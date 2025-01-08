@@ -9,40 +9,64 @@ class BartSummarizer(BaseModel):
         model_cfg = config.model
         finetune_cfg = config.finetune_strategy
         
-        self.tokenizer = BartTokenizer.from_pretrained(model_cfg.tokenizer_name)
-        
-        # 양자화 설정
-        quant_config = self.setup_quantization(finetune_cfg)
-        
         # 모델 로드
         self.model = BartForConditionalGeneration.from_pretrained(
             model_cfg.name,
-            quantization_config=quant_config,
             device_map="auto" if torch.cuda.is_available() else None,
-            torch_dtype=torch.float16 if model_cfg.get("use_fp16", False) else torch.float32
+            torch_dtype=torch.float16 if model_cfg.get("use_fp16", False) else torch.float32,
         )
         
-        # QLoRA 설정
-        if finetune_cfg.get("quantization") == "qlora":
-            from peft import prepare_model_for_kbit_training
-            
-            # QLoRA를 위한 모� 준비
-            self.model = prepare_model_for_kbit_training(
-                self.model, 
-                use_gradient_checkpointing=True
-            )
-            
-            # LoRA 적용
-            self.model = self.apply_lora(self.model, finetune_cfg, "bart", "SEQ_2_SEQ_LM")
-        else:
-            # 일반 학습의 경우 gradient checkpointing 활성화
-            self.model.gradient_checkpointing_enable()
-            
-            # 모든 파라��터 학습 가능하도록 설정
-            for param in self.model.parameters():
-                if param.dtype in [torch.float16, torch.float32, torch.float64]:
-                    param.requires_grad = True
+        # 먼저 모든 ��이어 이름 출력
+        print("\nAvailable layers:")
+        for name, _ in self.model.named_parameters():
+            print(f"  - {name}")
         
+        # 1. 먼저 모� 파라미터 동결
+        for param in self.model.parameters():
+            param.requires_grad = False
+        
+        # 2. 특정 레이어만 학습 가능하도록 설정
+        trainable_layers = getattr(finetune_cfg, "unfreeze_layers", [
+            "model.decoder.layers.11.self_attn.q_proj",
+            "model.decoder.layers.11.self_attn.v_proj",
+            "model.decoder.layers.11.fc1",
+            "model.decoder.layers.11.fc2",
+            "model.decoder.layers.10.self_attn.q_proj",
+            "model.decoder.layers.10.self_attn.v_proj",
+            "model.decoder.layers.10.fc1",
+            "model.decoder.layers.10.fc2",
+            "model.shared",
+            "final_logits_bias"
+        ])
+        
+        # 3. 학습 가능한 레이어 설정 및 확인
+        trainable_found = False
+        for name, param in self.model.named_parameters():
+            # 정확한 이름 매칭을 위해 'model.' 접두사 추가
+            full_name = f"model.{name}" if not name.startswith("model.") else name
+            if any(layer in full_name for layer in trainable_layers):
+                param.requires_grad = True
+                trainable_found = True
+                print(f"Trainable layer found: {name}")
+        
+        if not trainable_found:
+            print("\nWarning: No trainable layers found! Available layers:")
+            for name, _ in self.model.named_parameters():
+                print(f"  - model.{name}")
+        
+        # 4. 모델을 �시적으로 train 모드로 설정
+        self.model.train()
+        
+        # 5. gradient checkpointing 활성�
+        if getattr(finetune_cfg, "gradient_checkpointing", True):
+            self.model.gradient_checkpointing_enable()
+        
+        # 6. 학습 가능한 파라미터 수 출력
+        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        total_params = sum(p.numel() for p in self.model.parameters())
+        print(f"\nTrainable parameters: {trainable_params:,} / {total_params:,} ({100 * trainable_params / total_params:.2f}%)")
+        
+        self.tokenizer = BartTokenizer.from_pretrained(model_cfg.tokenizer_name)
         self.max_length = model_cfg.max_length
         self.num_beams = model_cfg.num_beams
 
@@ -55,9 +79,19 @@ class BartSummarizer(BaseModel):
         return outputs
 
     def generate_summary(self, text):
+        # 입력 텍스트 토크나이징
         inputs = self.tokenizer(
-            text, return_tensors="pt", max_length=self.max_length, truncation=True
+            text, 
+            return_tensors="pt", 
+            max_length=self.max_length, 
+            truncation=True
         )
+        
+        # 모든 텐서를 모델과 같은 디바이스로 이동
+        device = next(self.model.parameters()).device
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        
+        # 요약 생성
         summary_ids = self.model.generate(
             input_ids=inputs["input_ids"],
             attention_mask=inputs["attention_mask"],
@@ -65,4 +99,5 @@ class BartSummarizer(BaseModel):
             max_length=self.max_length,
             early_stopping=True
         )
+        
         return self.tokenizer.decode(summary_ids[0], skip_special_tokens=True)

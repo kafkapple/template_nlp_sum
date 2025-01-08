@@ -1,10 +1,13 @@
 from abc import ABC
 import torch
+import torch.nn as nn
 from transformers import BitsAndBytesConfig
 from peft import LoraConfig, prepare_model_for_kbit_training, get_peft_model
-import torch.nn as nn
 
-class BaseModel(ABC):
+class BaseModel(nn.Module, ABC):
+    def __init__(self):
+        super().__init__()
+        
     def setup_quantization(self, finetune_cfg):
         """양자화 설정"""
         quant_mode = finetune_cfg.get("quantization", "none")
@@ -41,7 +44,7 @@ class BaseModel(ABC):
         
         model = get_peft_model(model, config)
         model.print_trainable_parameters()
-        return model 
+        return model
 
     def setup_layer_freezing(self, model, fine_tuning_cfg):
         """레이어 동결/해제 설정"""
@@ -83,4 +86,8 @@ class BaseModel(ABC):
             f'trainable params: {trainable_params:,d} || '
             f'all params: {all_params:,d} || '
             f'trainable%: {100 * trainable_params / all_params:.2f}%'
-        ) 
+        )
+
+    def parameters(self):
+        """모델 파라미터 반환"""
+        return self.model.parameters() 

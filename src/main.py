@@ -7,6 +7,7 @@ from data.dataloader import create_dataloader
 from model.model_factory import get_model
 from trainer.trainer import SummarizationModule
 import warnings
+from omegaconf import DictConfig, OmegaConf
 warnings.filterwarnings("ignore")
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config.yaml")
@@ -47,24 +48,13 @@ def main(cfg: DictConfig):
     )
 
     # 6. Logger 설정
-    loggers = []
-    
-    if train_cfg.logging.wandb.enabled:
-        from src.logger.wandb_logger import WandBLogger
-        wandb_logger = WandBLogger(
-            project=train_cfg.logging.wandb.project,
-            name=train_cfg.logging.wandb.name,
-            save_dir=train_cfg.logging.save_dir,
-            config=cfg
-        )
-        loggers.append(wandb_logger)
-    
-    if train_cfg.logging.tensorboard.enabled:
-        tensorboard_logger = pl.loggers.TensorBoardLogger(
-            save_dir=train_cfg.logging.save_dir,
-            name=train_cfg.logging.tensorboard.name
-        )
-        loggers.append(tensorboard_logger)
+    from logger.wandb_logger import WandBLogger
+    wandb_logger = WandBLogger(
+        project=train_cfg.logging.wandb.project,
+        name=train_cfg.logging.wandb.name,
+        save_dir=train_cfg.logging.save_dir,
+        config=cfg
+    )
 
     # 7. Checkpoint 콜백 설정
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
@@ -77,7 +67,7 @@ def main(cfg: DictConfig):
         gpus=train_cfg.gpus,
         precision=train_cfg.precision,
         accumulate_grad_batches=train_cfg.accumulate_grad_batches,
-        logger=loggers,
+        logger=wandb_logger,
         callbacks=[checkpoint_callback],
         default_root_dir=train_cfg.logging.save_dir
     )

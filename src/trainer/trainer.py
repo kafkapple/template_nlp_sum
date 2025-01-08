@@ -3,6 +3,7 @@ import torch
 from omegaconf import OmegaConf
 from torch.utils.data import random_split
 from evaluation.metrics import compute_rouge, SummarizationMetrics
+import wandb
 
 class SummarizationModule(pl.LightningModule):
     def __init__(self, model, tokenizer, config):
@@ -18,27 +19,28 @@ class SummarizationModule(pl.LightningModule):
             "config": config_dict,
             "model_type": self.summarizer.__class__.__name__
         })
-        
-        # 모델 파라미터 수를 계산하기 위해 model 속성 추가
-        self.model = self.summarizer.model
 
     def configure_optimizers(self):
+        # 학습 가능한 파라미터만 optimizer에 전달
         optimizer = torch.optim.AdamW(
-            self.summarizer.model.parameters(),
+            filter(lambda p: p.requires_grad, self.summarizer.model.parameters()),
             lr=self.config.model.learning_rate,
             weight_decay=self.config.model.weight_decay
         )
         return optimizer
 
-    def training_step(self, batch, batch_idx):
+    def _shared_step(self, batch, batch_idx=None):
         dialogues, summaries = batch
+        
+        # 1. 데이터를 ��바른 디바이스로 이동
         tokenized = self.tokenizer(
             list(dialogues), 
             padding=True, 
             truncation=True, 
             max_length=512,
             return_tensors="pt"
-        )
+        ).to(self.device)
+        
         with self.tokenizer.as_target_tokenizer():
             labels = self.tokenizer(
                 list(summaries), 
@@ -46,89 +48,57 @@ class SummarizationModule(pl.LightningModule):
                 truncation=True, 
                 max_length=128,
                 return_tensors="pt"
-            ).input_ids
+            ).input_ids.to(self.device)
+        
+        # 2. forward pass 전에 train/eval ��드 설정
+        if self.training:
+            self.summarizer.train()
+            # training 모드에서는 gradient 계산이 필요
+            outputs = self.summarizer.model(
+                input_ids=tokenized["input_ids"],
+                attention_mask=tokenized["attention_mask"],
+                labels=labels
+            )
+            loss = outputs.loss
+            assert loss.requires_grad, "Loss does not require gradients in training mode!"
+            return loss, None, None
+        else:
+            # validation 모드
+            self.summarizer.eval()
+            with torch.no_grad():  # validation에서는 gradient 계산 불필요
+                outputs = self.summarizer.model(
+                    input_ids=tokenized["input_ids"],
+                    attention_mask=tokenized["attention_mask"],
+                    labels=labels
+                )
+                loss = outputs.loss
+                
+                # 첫 번째 배��의 첫 번째 예시에 대해서만 생성
+                if batch_idx == 0:
+                    generated_summary = self.summarizer.generate_summary(dialogues[0])
+                    return loss, [generated_summary], [summaries[0]]
+                
+                return loss, None, None
 
-        tokenized = {k: v.to(self.device) for k, v in tokenized.items()}
-        labels = labels.to(self.device)
-
-        outputs = self.summarizer.model(
-            input_ids=tokenized["input_ids"],
-            attention_mask=tokenized["attention_mask"],
-            labels=labels
-        )
-
-        loss = outputs.loss
-        self.log("train_loss", loss, on_epoch=True, prog_bar=True, batch_size=len(dialogues))
+    def training_step(self, batch, batch_idx):
+        loss, _, _ = self._shared_step(batch, batch_idx)
+        self.log("train_loss", loss, on_epoch=True, prog_bar=True, batch_size=len(batch[0]))
         return loss
 
     def validation_step(self, batch, batch_idx):
-        dialogues, summaries = batch
-        tokenized = self.tokenizer(
-            list(dialogues), 
-            padding=True, 
-            truncation=True, 
-            max_length=512,
-            return_tensors="pt"
-        )
-        with self.tokenizer.as_target_tokenizer():
-            labels = self.tokenizer(
-                list(summaries), 
-                padding=True, 
-                truncation=True, 
-                max_length=128,
-                return_tensors="pt"
-            ).input_ids
-
-        tokenized = {k: v.to(self.device) for k, v in tokenized.items()}
-        labels = labels.to(self.device)
-
-        outputs = self.summarizer.model(
-            input_ids=tokenized["input_ids"],
-            attention_mask=tokenized["attention_mask"],
-            labels=labels
-        )
-
-        loss = outputs.loss
-        self.log("val_loss", loss, on_epoch=True, prog_bar=True, batch_size=len(dialogues))
+        loss, generated_texts, target_texts = self._shared_step(batch, batch_idx)
         
-        batch_size = len(dialogues)
+        # 샘플 텍스트 로깅 (첫 번째 배치의 첫 번째 예시만)
+        if batch_idx == 0 and generated_texts is not None:
+            wandb.log({
+                "example_generation": wandb.Table(
+                    columns=["Generated", "Target"],
+                    data=[[generated_texts[0], target_texts[0]]]
+                )
+            })
         
-        generated_ids = self.summarizer.model.generate(
-            input_ids=tokenized["input_ids"],
-            attention_mask=tokenized["attention_mask"],
-            max_length=self.config.model.max_length,
-            num_beams=self.config.model.num_beams,
-            early_stopping=True
-        )
-        
-        generated_summaries = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
-        
-        metric_scores = self.metrics.compute_metrics(
-            predictions=generated_summaries,
-            references=summaries
-        )
-        
-        # 생성된 요약� 샘플 로깅 (매 N 스텝마다)
-        if batch_idx % self.config.trainer.get('log_every_n_steps', 100) == 0:
-            sample_idx = 0  # 첫 �째 배치 아이템
-            self.logger.experiment.log_text(
-                f"Original: {dialogues[sample_idx]}\n"
-                f"Generated: {generated_summaries[sample_idx]}\n"
-                f"Reference: {summaries[sample_idx]}"
-            )
-        
-        # 메트릭 로깅
-        for metric_name, score in metric_scores.items():
-            self.log(
-                f"val_{metric_name}",
-                score,
-                on_epoch=True,
-                prog_bar=True,
-                batch_size=batch_size,
-                sync_dist=True
-            )
-        
-        return loss
+        self.log("val_loss", loss, prog_bar=True, batch_size=len(batch[0]))
+        return {"val_loss": loss, "generated_texts": generated_texts, "target_texts": target_texts}
 
     def on_train_epoch_end(self):
         """에폭 종료 시 추가 메트릭 계산 및 시각화"""
@@ -142,7 +112,7 @@ class SummarizationModule(pl.LightningModule):
             )
 
     def plot_training_curves(self):
-        """학습 곡선 시각��"""
+        """학습 곡선 시각화"""
         import matplotlib.pyplot as plt
         
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))

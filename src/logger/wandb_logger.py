@@ -1,44 +1,52 @@
 import wandb
-from typing import Any, Dict, Optional
 import pytorch_lightning as pl
+from typing import Dict, Any, Optional
+from omegaconf import OmegaConf
 from .base_logger import BaseLogger
 
-class WandBLogger(pl.LightningLoggerBase, BaseLogger):
+class WandBLogger(pl.loggers.WandbLogger, BaseLogger):
     def __init__(
         self,
         project: str,
-        name: Optional[str] = None,
-        save_dir: str = "logs",
-        config: Optional[Dict[str, Any]] = None,
-        **kwargs
+        name: str,
+        save_dir: str,
+        config: Dict[str, Any]
     ):
-        super().__init__()
-        self.project = project
-        self.name = name
-        self.save_dir = save_dir
-        self.config = config
+        # Hydra config를 일반 dict로 변환
+        wandb_config = OmegaConf.to_container(config, resolve=True)
         
-        # WandB 초기화
         wandb.init(
             project=project,
             name=name,
             dir=save_dir,
-            config=config,
-            **kwargs
+            config=wandb_config
+        )
+        
+        super().__init__(
+            project=project,
+            name=name,
+            save_dir=save_dir,
+            config=wandb_config
         )
     
     def log_metrics(self, metrics: Dict[str, float], step: Optional[int] = None):
         """메트릭 로깅"""
+        if wandb.run is None:
+            wandb.init()
         wandb.log(metrics, step=step)
     
     def log_hyperparams(self, params: Dict[str, Any]):
         """하이퍼파라미터 로깅"""
+        if wandb.run is None:
+            wandb.init()
         wandb.config.update(params)
     
     def log_artifact(self, artifact_name: str, artifact_path: str, artifact_type: str):
         """모델 체크포인트 등 아티팩트 로깅"""
+        if wandb.run is None:
+            wandb.init()
         artifact = wandb.Artifact(
-            artifact_name,
+            name=artifact_name,
             type=artifact_type
         )
         artifact.add_file(artifact_path)
@@ -46,10 +54,17 @@ class WandBLogger(pl.LightningLoggerBase, BaseLogger):
     
     def log_text(self, text: str, step: Optional[int] = None):
         """텍스트 로깅"""
-        wandb.log({"text": wandb.Html(text)}, step=step)
+        if wandb.run is None:
+            wandb.init()
+        # wandb.Table을 사용하여 텍스트를 로깅
+        table = wandb.Table(columns=["Generated Text"])
+        table.add_data(text)
+        wandb.log({"generated_text": table}, step=step)
     
     def log_figure(self, figure_name: str, figure, step: Optional[int] = None):
         """시각화 결과 로깅"""
+        if wandb.run is None:
+            wandb.init()
         wandb.log({figure_name: figure}, step=step)
 
     @property
