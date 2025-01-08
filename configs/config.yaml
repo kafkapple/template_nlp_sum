@@ -1,0 +1,74 @@
+# configs/config.yaml
+
+defaults:
+  - dataset: dialogsum
+  - model: bart
+  - trainer: train
+  - _self_
+
+experiment_name: "dialogue_summarization_project"
+
+paths:
+  root_dir: ${hydra:runtime.cwd}
+  timestamp: ${now:%Y%m%d_%H%M%S}
+  output_dir: outputs/${paths.timestamp}
+  log_dir: ${paths.output_dir}/logs  # Lightning 로그 저장 위치
+
+# 학습 전략 설정
+fine_tuning:
+  # 선택적으로 해동할 레이어 (모델별 설정)
+  unfreeze_layers: []  # 기본값은 빈 리스트 (전체 레이어 frozen)
+  gradient_checkpointing: true
+  freeze_embeddings: true
+  
+  # 추가 학습 옵션
+  warmup_steps: 500
+  max_grad_norm: 1.0
+  scheduler:
+    name: "linear"  # linear, cosine, polynomial
+    num_warmup_steps: 500
+    num_training_steps: 5000
+
+# 메트릭 설정 추가
+metrics:
+  rouge:
+    enabled: true
+    types: ["rouge1", "rouge2", "rougeL"]
+    use_stemmer: true
+    use_aggregator: false
+    lowercase: true
+  
+  bertscore:
+    enabled: false
+    model_type: "microsoft/deberta-xlarge-mnli"
+    batch_size: 8
+    
+  meteor:
+    enabled: false
+    
+  bleu:
+    enabled: false
+    smooth_method: "method1"
+    
+  bleurt:
+    enabled: false
+
+# QLoRA나 기타 옵션 관리
+finetune_strategy:
+  quantization: "qlora" # "none", "qlora", "8bit" 중 하나만 선택
+  lora_config:
+    rank: 8
+    alpha: 32
+    dropout: 0.1
+    target_modules:
+      bart: ["q_proj", "v_proj", "k_proj", "o_proj"]
+      t5: ["q", "v", "k", "o"]
+      llama: ["q_proj", "v_proj", "k_proj", "o_proj"]
+
+# 추가 전처리 옵션
+preprocessing:
+  remove_special_chars: true
+  lower_case: false
+
+
+#

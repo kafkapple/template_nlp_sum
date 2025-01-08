@@ -1,0 +1,8 @@
+name: dialogsum
+url: https://github.com/cylnlp/dialogsum/tree/main/DialogSum_Data
+train_file: dialogsum.train.jsonl
+dev_file: dialogsum.dev.jsonl
+test_file: dialogsum.test.jsonl
+batch_size: 4
+max_length: 512
+dataset_dir: "data"

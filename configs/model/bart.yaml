@@ -1,0 +1,30 @@
+model:
+  name: "facebook/bart-base"
+  tokenizer_name: "facebook/bart-base"
+  max_length: 128
+  num_beams: 4
+  learning_rate: 3e-5
+  weight_decay: 0.01
+  use_pretrained: true
+
+  # BART 특화 fine-tuning 설정
+  fine_tuning:
+    unfreeze_options:
+      # 전체 레이어 목록
+      layers:
+        encoder: ["layers.0", "layers.1", "layers.2", "layers.3", "layers.4", "layers.5",
+                 "layers.6", "layers.7", "layers.8", "layers.9", "layers.10", "layers.11"]
+        decoder: ["layers.0", "layers.1", "layers.2", "layers.3", "layers.4", "layers.5",
+                 "layers.6", "layers.7", "layers.8", "layers.9", "layers.10", "layers.11"]
+      # 특정 컴포넌트 선택
+      components: ["embeddings", "layernorm", "attention", "ffn"]
+      
+    # 기본 설정
+    unfreeze_layers: [
+      "encoder.layers.11",
+      "encoder.layers.10",
+      "decoder.layers.11", 
+      "decoder.layers.10"
+    ]
+    gradient_checkpointing: true
+    freeze_embeddings: true
