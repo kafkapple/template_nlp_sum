@@ -4,25 +4,29 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.8
-  - pytorch
+  - python=3.10
+  - pip>=22.0
+  - pytorch=1.12.1
+  - cpuonly
   - torchvision
-  - pytorch-lightning
   - transformers
-  - numpy
+  - datasets
+  - evaluate
+  - nltk
   - pandas
-  - matplotlib
+  - numpy
+  - scikit-learn
   - wandb
   - hydra-core
-  - omegaconf
-  - scikit-learn
   - tqdm
-  - pip
   - pip:
-    - datasets
-    - evaluate
-    - rouge-score
-    - sentencepiece
-    - accelerate
     - bitsandbytes
+    - accelerate
     - peft
+    - pytorch-lightning==1.8.6
+    - sentencepiece
+    - protobuf
+    - rouge-score
+    - bert-score
+    - sacrebleu
+    - torchmetrics<1.0.0

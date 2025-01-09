@@ -1,7 +1,9 @@
 # src/main.py
 import os
-# OpenMP ��류 방지를 위한 환경 변수 설정
+# OpenMP 오류 방지를 위한 환경 변수 설정
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+# Intel JIT 프로파일러 비활성화
+os.environ['PYTORCH_JIT'] = '0'
 
 import hydra
 from omegaconf import DictConfig
@@ -65,10 +67,11 @@ def main(cfg: DictConfig):
         **OmegaConf.to_container(train_cfg.checkpoint, resolve=True)
     )
 
-    # 8. Trainer 설정 #I love you
+    # 8. Trainer 설정
     trainer = pl.Trainer(
         max_epochs=train_cfg.max_epochs,
-        gpus=train_cfg.gpus,
+        accelerator="gpu",
+        devices=train_cfg.gpus,
         precision=train_cfg.precision,
         accumulate_grad_batches=train_cfg.accumulate_grad_batches,
         logger=wandb_logger,
