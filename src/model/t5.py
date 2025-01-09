@@ -14,7 +14,7 @@ class T5Summarizer(BaseModel):
     def __init__(self, config):
         super().__init__()
         model_cfg = config.model
-        finetune_cfg = config.finetune_strategy
+        finetune_cfg = config.model.fine_tuning
         self.config = config
         
         # 모델과 토크나이저 로드
@@ -82,23 +82,25 @@ class T5Summarizer(BaseModel):
         
         inputs = self.tokenizer(
             text,
-            max_length=self.config.preprocessing.max_length,
+            max_length=self.max_length,
             truncation=True,
             padding=True,
             return_tensors="pt"
         ).to(self.device)
         
+        gen_cfg = self.config.model.generation
         outputs = self.model.generate(
             input_ids=inputs.input_ids,
             attention_mask=inputs.attention_mask,
-            max_length=self.max_length,
+            max_length=gen_cfg.max_length,
+            min_length=gen_cfg.min_length,
             num_beams=self.num_beams,
-            length_penalty=2.0,
-            early_stopping=True,
-            no_repeat_ngram_size=3,
-            temperature=0.7,
-            top_p=0.9,
-            repetition_penalty=1.2
+            length_penalty=gen_cfg.length_penalty,
+            no_repeat_ngram_size=gen_cfg.no_repeat_ngram_size,
+            temperature=gen_cfg.temperature,
+            top_p=gen_cfg.top_p,
+            repetition_penalty=gen_cfg.repetition_penalty,
+            early_stopping=True
         )
         
         return self.tokenizer.decode(outputs[0], skip_special_tokens=True)

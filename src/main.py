@@ -1,5 +1,10 @@
 # src/main.py
 import os
+# 메인 파일 시작 부분에 추가
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # TensorFlow 로깅 끄기
+os.environ['TRANSFORMERS_VERBOSITY'] = 'error'  # Transformers 로깅 레벨 설정
+os.environ['TRANSFORMERS_NO_ADVISORY_WARNINGS'] = 'true'  # 경고 메시지 끄기
+
 # OpenMP 오류 방지를 위한 환경 변수 설정
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 # Intel JIT 프로파일러 비활성화

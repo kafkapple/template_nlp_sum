@@ -6,7 +6,7 @@ class LlamaSummarizer(BaseModel):
     def __init__(self, config):
         super().__init__()
         model_cfg = config.model
-        finetune_cfg = config.finetune_strategy
+        finetune_cfg = config.model.fine_tuning
         self.config = config
         
         # 모델과 토크나이저 로드
@@ -88,19 +88,19 @@ class LlamaSummarizer(BaseModel):
             max_length=self.max_length,
             truncation=True,
             padding=True
-        )
+        ).to(self.device)
         
-        device = next(self.model.parameters()).device
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-        
-        # 생성 파라미터 조정
+        gen_cfg = self.config.model.generation
         outputs = self.model.generate(
             **inputs,
-            max_length=self.max_length,
+            max_length=gen_cfg.max_length,
+            min_length=gen_cfg.min_length,
             num_beams=self.num_beams,
-            temperature=0.7,
-            top_p=0.9,
-            repetition_penalty=1.2,
+            length_penalty=gen_cfg.length_penalty,
+            no_repeat_ngram_size=gen_cfg.no_repeat_ngram_size,
+            temperature=gen_cfg.temperature,
+            top_p=gen_cfg.top_p,
+            repetition_penalty=gen_cfg.repetition_penalty,
             early_stopping=True,
             pad_token_id=self.tokenizer.pad_token_id,
             eos_token_id=self.tokenizer.eos_token_id

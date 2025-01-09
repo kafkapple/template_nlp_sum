@@ -2,6 +2,10 @@ from evaluate import load
 import evaluate
 from typing import List, Dict, Union, Optional
 import numpy as np
+import logging
+
+# absl 로거 끄기
+logging.getLogger('absl').setLevel(logging.ERROR)
 
 def compute_rouge(predictions: List[str], references: List[str]) -> Dict[str, float]:
     """ROUGE 스코어 계산"""

@@ -82,38 +82,46 @@ class SummarizationModule(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         loss, _, _ = self._shared_step(batch, batch_idx)
-        self.log("train_loss", loss, on_epoch=True, prog_bar=True, batch_size=len(batch[0]))
+        self.log(
+            "train_loss", 
+            loss, 
+            on_epoch=True, 
+            prog_bar=True, 
+            batch_size=len(batch[0])
+        )
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss, generated_texts, target_texts = self._shared_step(batch, batch_idx)
+        loss, target_texts, generated_texts = self.summarizer._shared_step(batch, batch_idx)
         
-        # 샘플 텍스트 로깅 (첫 번째 배치의 첫 번째 예시만)
-        if batch_idx == 0 and generated_texts is not None:
-            rouge_scores = compute_rouge(generated_texts, target_texts)
-            
-            wandb.log({
-                "example_generation": wandb.Table(
-                    columns=["Generated", "Target", "ROUGE-1", "ROUGE-2", "ROUGE-L"],
-                    data=[[
-                        generated_texts[0], 
-                        target_texts[0],
-                        rouge_scores['rouge1'],
-                        rouge_scores['rouge2'],
-                        rouge_scores['rougeL']
-                    ]]
-                )
-            })
+        # 디버깅을 위한 출력 추가
+        if batch_idx == 0:  # 첫 번째 배치에 대해서만
+            print("\n=== Validation Sample ===")
+            for i in range(min(3, len(target_texts))):  # 처음 3개 샘플만
+                print(f"\nInput: {batch[0][i][:100]}...")  # 입력 텍스트 앞부분
+                print(f"Target: {target_texts[i]}")
+                print(f"Generated: {generated_texts[i]}")
+                print("-" * 50)
         
-        # validation_step에서 출력을 저장
-        self.validation_step_outputs.append({
-            "loss": loss,
-            "generated_texts": generated_texts,
-            "target_texts": target_texts
-        })
+        # 기존 메트릭 계산
+        metrics = self.metrics.compute_metrics(generated_texts, target_texts)
         
-        self.log("val_loss", loss, prog_bar=True, batch_size=len(batch[0]))
-        return {"val_loss": loss, "generated_texts": generated_texts, "target_texts": target_texts}
+        # batch_size 명시적으로 지정하여 로깅
+        batch_size = len(batch[0])  # 배치의 첫 번째 요소(입력 텍스트)의 길이
+        self.log_dict(
+            {f"val_{k}": v for k, v in metrics.items()},
+            batch_size=batch_size,
+            prog_bar=True
+        )
+        
+        # loss도 batch_size와 함께 로깅
+        self.log("val_loss", loss, batch_size=batch_size, prog_bar=True)
+        
+        return {
+            "val_loss": loss, 
+            "metrics": metrics,
+            "batch_size": batch_size  # 나중에 사용할 수 있도록 batch_size도 반환
+        }
 
     def on_validation_epoch_start(self):
         """검증 에폭 시작 시 출력 저장용 리스트 초기화"""

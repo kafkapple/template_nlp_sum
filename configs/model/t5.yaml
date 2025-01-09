@@ -6,22 +6,31 @@ learning_rate: 5e-5
 weight_decay: 0.01
 use_pretrained: true
 
-# T5 특화 fine-tuning 설정
+# Fine-tuning 전략
 fine_tuning:
-  unfreeze_options:
-    layers:
-      encoder: ["block.0", "block.1", "block.2", "block.3", "block.4", "block.5",
-                "block.6", "block.7", "block.8", "block.9", "block.10", "block.11"]
-      decoder: ["block.0", "block.1", "block.2", "block.3", "block.4", "block.5",
-                "block.6", "block.7", "block.8", "block.9", "block.10", "block.11"]
-    components: ["embeddings", "layernorm", "attention", "ffn"]
-  
-  unfreeze_layers: [
-    "encoder.block.11",
-    "encoder.block.10",
-    "decoder.block.11",
-    "decoder.block.10",
-    "shared"
-  ]
+  unfreeze_layers:
+    - "encoder.block.11"
+    - "encoder.block.10"
+    - "decoder.block.11"
+    - "decoder.block.10"
+    - "shared"
   gradient_checkpointing: true
   freeze_embeddings: true
+  quantization: "none"
+  lora_config:
+    enabled: false
+    rank: 8
+    alpha: 32
+    dropout: 0.1
+    target_modules:
+      t5: ["q", "v"]
+
+# 생성 파라미터
+generation:
+  max_length: 150
+  min_length: 50
+  length_penalty: 2.0
+  no_repeat_ngram_size: 3
+  temperature: 0.7
+  top_p: 0.9
+  repetition_penalty: 1.2

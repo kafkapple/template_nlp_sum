@@ -21,22 +21,22 @@ preprocessing:
   clean_text: true
   remove_special_chars: true
 
-# 미세조정 전략 설정
-finetune_strategy:
-  # 기본 설정
-  gradient_checkpointing: true
-  freeze_embeddings: true
+# # 미세조정 전략 설정
+# finetune_strategy:
+#   # 기본 설정
+#   gradient_checkpointing: true
+#   freeze_embeddings: true
   
-  # 학습할 레이어 설정 (T5 모델용)
-  unfreeze_layers:
-    - "shared"
-    - "encoder.block.0"
-    - "encoder.block.1"
-    - "decoder.block.0"
-    - "decoder.block.1"
+#   # 학습할 레이어 설정 (T5 모델용)
+#   unfreeze_layers:
+#     - "shared"
+#     - "encoder.block.0"
+#     - "encoder.block.1"
+#     - "decoder.block.0"
+#     - "decoder.block.1"
 
-  # 양자화 설정
-  quantization: "none"
+#   # 양자화 설정
+#   quantization: "none"
 
 # 메트릭 설정
 metrics:

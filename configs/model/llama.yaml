@@ -6,8 +6,8 @@ num_beams: 4
 learning_rate: 5e-5
 weight_decay: 0.01
 
-# Fine-tuning 설정 수정
-finetune_strategy:
+# Fine-tuning 전략
+fine_tuning:
   unfreeze_layers:
     - "model.layers.31"
     - "model.layers.30"
@@ -16,8 +16,21 @@ finetune_strategy:
     - "lm_head"
   gradient_checkpointing: true
   freeze_embeddings: true
+  quantization: "qlora"  # LLaMA는 기본적으로 QLora 사용
+  lora_config:
+    enabled: true
+    rank: 8
+    alpha: 32
+    dropout: 0.1
+    target_modules:
+      llama: ["q_proj", "v_proj"]
 
+# 생성 파라미터
 generation:
+  max_length: 150
+  min_length: 50
+  length_penalty: 2.0
+  no_repeat_ngram_size: 3
   temperature: 0.7
   top_p: 0.9
   repetition_penalty: 1.2

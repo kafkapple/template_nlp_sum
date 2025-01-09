@@ -7,7 +7,7 @@ class BartSummarizer(BaseModel):
     def __init__(self, config):
         super().__init__()
         model_cfg = config.model
-        finetune_cfg = config.finetune_strategy
+        finetune_cfg = config.model.fine_tuning
         self.config = config
         
         # 모델 로드
@@ -95,8 +95,9 @@ class BartSummarizer(BaseModel):
             input_ids=inputs.input_ids,
             attention_mask=inputs.attention_mask,
             max_length=self.max_length,
-            num_beams=self.num_beams,
+            min_length=50,
             length_penalty=2.0,
+            num_beams=self.num_beams,
             early_stopping=True,
             no_repeat_ngram_size=3,
             temperature=0.7,
