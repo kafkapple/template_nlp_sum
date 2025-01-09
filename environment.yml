@@ -6,8 +6,7 @@ channels:
 dependencies:
   - python=3.10
   - pip>=22.0
-  - pytorch=1.12.1
-  - cpuonly
+  - pytorch=2.0.0
   - torchvision
   - transformers
   - datasets
@@ -19,11 +18,12 @@ dependencies:
   - wandb
   - hydra-core
   - tqdm
+  - pip
   - pip:
     - bitsandbytes
     - accelerate
     - peft
-    - pytorch-lightning==1.8.6
+    - pytorch-lightning
     - sentencepiece
     - protobuf
     - rouge-score
