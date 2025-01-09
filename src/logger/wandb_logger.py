@@ -19,7 +19,8 @@ class WandBLogger(pl.loggers.WandbLogger, BaseLogger):
             project=project,
             name=name,
             dir=save_dir,
-            config=wandb_config
+            config=wandb_config,
+            reinit=True
         )
         
         super().__init__(
@@ -39,7 +40,7 @@ class WandBLogger(pl.loggers.WandbLogger, BaseLogger):
         """하이퍼파라미터 로깅"""
         if wandb.run is None:
             wandb.init()
-        wandb.config.update(params)
+        wandb.config.update(params, allow_val_change=True)
     
     def log_artifact(self, artifact_name: str, artifact_path: str, artifact_type: str):
         """모델 체크포인트 등 아티팩트 로깅"""
@@ -86,3 +87,11 @@ class WandBLogger(pl.loggers.WandbLogger, BaseLogger):
     def name(self, value):
         """Set the experiment name."""
         self._name = value
+
+    def save(self):
+        """현재 상태 저장"""
+        wandb.save()
+
+    def finalize(self, status):
+        """실험 종료"""
+        wandb.finish(exit_code=0 if status == "success" else 1)

@@ -20,31 +20,57 @@ class SummarizationModule(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         loss, _, _ = self.model._shared_step(batch, batch_idx)
         
-        # WandB에 학습 지표 로깅
-        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        # batch_size 계산
+        batch_size = len(batch[0]) if isinstance(batch, (list, tuple)) else len(batch)
+        
+        # WandB에 학습 지표 로깅 (batch_size 명시)
+        self.log('train_loss', loss, 
+                 on_step=True, 
+                 on_epoch=True, 
+                 prog_bar=True, 
+                 logger=True,
+                 batch_size=batch_size)  # batch_size 추가
         
         return loss
     
     def validation_step(self, batch, batch_idx):
         loss, references, predictions = self.model._shared_step(batch, batch_idx)
         
-        # WandB에 검증 지표 로깅
-        self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        # batch_size 계산
+        batch_size = len(batch[0]) if isinstance(batch, (list, tuple)) else len(batch)
+        
+        # WandB에 검증 지표 로깅 (batch_size 명시)
+        self.log('val_loss', loss, 
+                 on_step=False, 
+                 on_epoch=True, 
+                 prog_bar=True, 
+                 logger=True,
+                 batch_size=batch_size)
         
         # 메트릭 계산 및 로깅
         if predictions is not None and references is not None:
             metrics = self.metrics.compute_metrics(predictions, references)
             for metric_name, value in metrics.items():
-                self.log(f'val_{metric_name}', value, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+                self.log(f'val_{metric_name}', value, 
+                        on_step=False, 
+                        on_epoch=True, 
+                        prog_bar=True, 
+                        logger=True,
+                        batch_size=batch_size)
         
         # 출력 저장
         self.validation_step_outputs.append({
             'val_loss': loss,
             'references': references,
-            'predictions': predictions
+            'predictions': predictions,
+            'batch_size': batch_size
         })
         
-        return {'val_loss': loss, 'references': references, 'predictions': predictions}
+        return {
+            'val_loss': loss,
+            'metrics': metrics if 'metrics' in locals() else {},
+            'batch_size': batch_size
+        }
     
     def on_validation_epoch_end(self):
         """검증 에폭 종료 시 전체 메트릭 계산"""
