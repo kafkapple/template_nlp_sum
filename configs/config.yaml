@@ -6,7 +6,7 @@ experiment_name: "dialogue-summarization"
 # 기본 설정들
 defaults:
   - dataset: dialogsum  # 기본 데이터셋
-  - model: t5    # 기본 모델
+  - model: bart    # 기본 모델
   - trainer: train     # 학습 설정
   - _self_
 

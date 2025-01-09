@@ -15,6 +15,7 @@ class SummarizationModule(pl.LightningModule):
         self.config = config
         self.metrics = SummarizationMetrics(config)
         self.save_hyperparameters(config)
+        self.validation_step_outputs = []  # 검증 출력 저장용
         
     def training_step(self, batch, batch_idx):
         loss, _, _ = self.model._shared_step(batch, batch_idx)
@@ -36,28 +37,55 @@ class SummarizationModule(pl.LightningModule):
             for metric_name, value in metrics.items():
                 self.log(f'val_{metric_name}', value, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         
+        # 출력 저장
+        self.validation_step_outputs.append({
+            'val_loss': loss,
+            'references': references,
+            'predictions': predictions
+        })
+        
         return {'val_loss': loss, 'references': references, 'predictions': predictions}
     
-    def validation_epoch_end(self, outputs):
-        # 에포크 단위 메트릭 계산
-        if not outputs:
+    def on_validation_epoch_end(self):
+        """검증 에폭 종료 시 전체 메트릭 계산"""
+        if not self.validation_step_outputs:
             return
         
         # 전체 예측과 참조 수집
         all_predictions = []
         all_references = []
-        for output in outputs:
+        total_val_loss = 0
+        num_batches = 0
+        
+        for output in self.validation_step_outputs:
             if output['predictions'] is not None and output['references'] is not None:
                 all_predictions.extend(output['predictions'])
                 all_references.extend(output['references'])
+            total_val_loss += output['val_loss']
+            num_batches += 1
         
+        # 평균 validation loss 계산
+        avg_val_loss = total_val_loss / num_batches if num_batches > 0 else 0
+        
+        # 샘플 출력 (첫 번째 배치의 예시)
         if all_predictions and all_references:
-            # 전체 데이터셋에 대한 메트릭 계산
-            metrics = self.metrics.compute_metrics(all_predictions, all_references)
+            print(f"\n=== Validation Epoch {self.current_epoch} ===")
+            for i in range(min(3, len(all_predictions))):
+                print(f"\nTarget: {all_references[i]}")
+                print(f"Generated: {all_predictions[i]}")
+                print("-" * 50)
             
-            # WandB에 에포크 단위 메트릭 로깅
-            for metric_name, value in metrics.items():
-                self.log(f'epoch_val_{metric_name}', value, on_epoch=True, logger=True)
+            # 전체 메트릭 계산 및 출력
+            metrics = self.metrics.compute_metrics(all_predictions, all_references)
+            print(f"\nEpoch {self.current_epoch} Metrics:")
+            print(f"Val Loss: {avg_val_loss:.4f}")
+            for k, v in metrics.items():
+                self.log(f"epoch_val_{k}", v, on_epoch=True, logger=True)
+                print(f"{k}: {v:.4f}")
+            print("-" * 50)
+        
+        # 메모리 정리
+        self.validation_step_outputs.clear()
     
     def configure_optimizers(self):
         # 옵티마이저 설정
@@ -155,49 +183,6 @@ class SummarizationModule(pl.LightningModule):
     def on_validation_epoch_start(self):
         """검증 에폭 시작 시 출력 저장용 리스트 초기화"""
         self.validation_step_outputs = []
-
-    def on_validation_epoch_end(self):
-        """검증 에폭 종료 시 전체 ROUGE 스코어 계산"""
-        all_generated = []
-        all_targets = []
-        total_val_loss = 0
-        num_batches = 0
-        
-        # 샘플 출력을 위한 첫 번째 배치 데이터 찾기
-        first_batch = next((x for x in self.validation_step_outputs if x["batch_idx"] == 0), None)
-        
-        # 에폭 종료 시 샘플 출력
-        if first_batch and first_batch["generated_texts"]:
-            print(f"\n=== Validation Epoch {self.current_epoch} ===")
-            for i in range(min(3, len(first_batch["generated_texts"]))):
-                print(f"\nTarget: {first_batch['target_texts'][i]}")
-                print(f"Generated: {first_batch['generated_texts'][i]}")
-                print("-" * 50)
-        
-        # 전체 메트릭 계산
-        for output in self.validation_step_outputs:
-            if output["generated_texts"] and output["target_texts"]:
-                all_generated.extend(output["generated_texts"])
-                all_targets.extend(output["target_texts"])
-            total_val_loss += output["val_loss"]
-            num_batches += 1
-        
-        # 평균 validation loss 계산 및 로깅
-        avg_val_loss = total_val_loss / num_batches if num_batches > 0 else 0
-        self.log("val_loss", avg_val_loss, prog_bar=True, sync_dist=True)
-        
-        # 전체 데이터에 대한 ROUGE 스코어 계산 및 출력
-        if all_generated and all_targets:
-            rouge_scores = compute_rouge(all_generated, all_targets)
-            print(f"\nEpoch {self.current_epoch} Metrics:")
-            print(f"Val Loss: {avg_val_loss:.4f}")
-            for k, v in rouge_scores.items():
-                self.log(f"val_{k}", v, prog_bar=True, sync_dist=True)
-                print(f"{k}: {v:.4f}")
-            print("-" * 50)
-        
-        # 메모리 정리
-        self.validation_step_outputs.clear()
 
     def on_train_epoch_end(self):
         """에폭 종료 시 추가 메트릭 계산 및 시각화"""
