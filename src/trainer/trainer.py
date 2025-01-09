@@ -104,11 +104,11 @@ class SummarizationModule(pl.LightningModule):
         # 학습 곡선 시각화
         if self.current_epoch % self.config.trainer.get('plot_every_n_epochs', 1) == 0:
             fig = self.plot_training_curves()
-            self.logger.experiment.log_figure(
-                "training_curves",
-                fig,
-                self.current_epoch
-            )
+            self.logger.experiment.log({
+                "train/rouge_scores": wandb.Image(fig),  # matplotlib figure를 wandb.Image로 변환
+                "epoch": self.current_epoch
+            })
+            plt.close(fig)  # 메모리 누수 방지를 위해 figure 닫기
 
     def plot_training_curves(self):
         """학습 곡선 시각화"""
