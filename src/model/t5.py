@@ -1,3 +1,11 @@
+try:
+    import sentencepiece
+except ImportError:
+    raise ImportError(
+        "SentencePiece 라이브러리가 설치되어 있지 않습니다. "
+        "'pip install sentencepiece' 명령어로 설치해주세요."
+    )
+
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 import torch
 from .base_model import BaseModel

@@ -9,22 +9,11 @@ class LlamaSummarizer(BaseModel):
         finetune_cfg = config.finetune_strategy
         
         # 모델과 토크나이저 로드
-        self.tokenizer = LlamaTokenizer.from_pretrained(model_cfg.tokenizer_name)
         self.model = LlamaForCausalLM.from_pretrained(
             model_cfg.name,
-            device_map="auto" if torch.cuda.is_available() else None,
-            torch_dtype=torch.float16 if model_cfg.get("use_fp16", False) else torch.float32,
+            device_map="auto" if torch.cuda.is_available() else None
         )
-        
-        # special tokens 추가
-        special_tokens = {
-            "pad_token": "<pad>",
-            "sep_token": "<sep>",
-            "bos_token": "<s>",
-            "eos_token": "</s>"
-        }
-        self.tokenizer.add_special_tokens(special_tokens)
-        self.model.resize_token_embeddings(len(self.tokenizer))
+        self.tokenizer = LlamaTokenizer.from_pretrained(model_cfg.tokenizer_name)
         
         # 먼저 모든 레이어 이름 출력
         print("\nAvailable layers:")
@@ -37,11 +26,9 @@ class LlamaSummarizer(BaseModel):
         
         # 2. 특정 레이어만 학습 가능하도록 설정
         trainable_layers = getattr(finetune_cfg, "unfreeze_layers", [
-            "model.embed_tokens",
             "model.layers.0",
             "model.layers.1",
-            "model.norm",
-            "lm_head"
+            "lm_head"  # 출력 레이어는 항상 학습되도록
         ])
         
         trainable_found = False
@@ -52,7 +39,12 @@ class LlamaSummarizer(BaseModel):
                 print(f"Trainable layer found: {name}")
         
         if not trainable_found:
-            print("\nWarning: No trainable layers found! Check layer names in config.")
+            # 아무 레이어도 찾지 못했다면 마지막 레이어라도 학습하도록 설정
+            print("\nNo trainable layers found. Enabling last layer for training...")
+            for name, param in self.model.named_parameters():
+                if "lm_head" in name or "layers.31" in name:  # 마지막 레이어
+                    param.requires_grad = True
+                    print(f"Enabled training for: {name}")
         
         # 3. gradient checkpointing 활성화
         if getattr(finetune_cfg, "gradient_checkpointing", True):

@@ -4,6 +4,7 @@ from omegaconf import OmegaConf
 from torch.utils.data import random_split
 from evaluation.metrics import compute_rouge, SummarizationMetrics
 import wandb
+import matplotlib.pyplot as plt
 
 class SummarizationModule(pl.LightningModule):
     def __init__(self, model, tokenizer, config):
@@ -89,15 +90,57 @@ class SummarizationModule(pl.LightningModule):
         
         # 샘플 텍스트 로깅 (첫 번째 배치의 첫 번째 예시만)
         if batch_idx == 0 and generated_texts is not None:
+            rouge_scores = compute_rouge(generated_texts, target_texts)
+            
             wandb.log({
                 "example_generation": wandb.Table(
-                    columns=["Generated", "Target"],
-                    data=[[generated_texts[0], target_texts[0]]]
+                    columns=["Generated", "Target", "ROUGE-1", "ROUGE-2", "ROUGE-L"],
+                    data=[[
+                        generated_texts[0], 
+                        target_texts[0],
+                        rouge_scores['rouge1'],
+                        rouge_scores['rouge2'],
+                        rouge_scores['rougeL']
+                    ]]
                 )
             })
         
+        # validation_step에서 출력을 저장
+        self.validation_step_outputs.append({
+            "loss": loss,
+            "generated_texts": generated_texts,
+            "target_texts": target_texts
+        })
+        
         self.log("val_loss", loss, prog_bar=True, batch_size=len(batch[0]))
         return {"val_loss": loss, "generated_texts": generated_texts, "target_texts": target_texts}
+
+    def on_validation_epoch_start(self):
+        """검증 에폭 시작 시 출력 저장용 리스트 초기화"""
+        self.validation_step_outputs = []
+
+    def on_validation_epoch_end(self):
+        """검증 에폭 종료 시 전체 ROUGE 스코어 계산"""
+        # 모든 생성된 텍스트와 타겟 텍스트 수집
+        all_generated = []
+        all_targets = []
+        
+        for output in self.validation_step_outputs:
+            if output["generated_texts"] is not None and output["target_texts"] is not None:
+                all_generated.extend(output["generated_texts"])
+                all_targets.extend(output["target_texts"])
+        
+        # 전체 데이터에 대한 ROUGE 스코어 계산
+        if all_generated and all_targets:
+            rouge_scores = compute_rouge(all_generated, all_targets)
+            
+            # ROUGE 스코어 로깅
+            self.log("val_rouge1", rouge_scores['rouge1'], prog_bar=True)
+            self.log("val_rouge2", rouge_scores['rouge2'], prog_bar=True)
+            self.log("val_rougeL", rouge_scores['rougeL'], prog_bar=True)
+        
+        # 메모리 정리
+        self.validation_step_outputs.clear()
 
     def on_train_epoch_end(self):
         """에폭 종료 시 추가 메트릭 계산 및 시각화"""

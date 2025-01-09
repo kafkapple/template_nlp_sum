@@ -5,6 +5,12 @@ max_length: 512
 num_beams: 4
 learning_rate: 3e-5
 weight_decay: 0.01
-use_fp16: false
-use_pretrained: true
-use_custom: false
+
+# Fine-tuning 설정 추가
+finetune_strategy:
+  unfreeze_layers:
+    - "model.layers.31"  # 마지막 레이어
+    - "model.layers.30"  # 마지막에서 두 번째 레이어
+    - "lm_head"         # 출력 레이어
+  gradient_checkpointing: true
+  freeze_embeddings: true
