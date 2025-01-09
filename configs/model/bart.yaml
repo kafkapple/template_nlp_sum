@@ -11,11 +11,11 @@ use_pretrained: true
 # Fine-tuning 전략
 fine_tuning:
   unfreeze_layers:
-    - "encoder.layers.5"
-    - "encoder.layers.4"
-    - "decoder.layers.5"
-    - "decoder.layers.4"
+    - "encoder.layers.[0-5]"
+    - "decoder.layers.[0-5]"
     - "shared"
+    - "layernorm"
+    - "final_layer_norm"
   gradient_checkpointing: true
   freeze_embeddings: true
   quantization: "none"  # none, 8bit, qlora
@@ -24,6 +24,7 @@ fine_tuning:
     rank: 8
     alpha: 32
     dropout: 0.1
+  learning_rate: 1e-4
 
 # 생성 파라미터
 generation:

@@ -1,7 +1,7 @@
-max_epochs: 3
+max_epochs: 2
 gpus: 1
-precision: 32
-accumulate_grad_batches: 2
+precision: 16
+accumulate_grad_batches: 4
 
 # 로깅 관련 설정
 logging:
@@ -22,3 +22,9 @@ checkpoint:
   save_top_k: 3
   monitor: "val_loss"
   mode: "min"
+
+optimizer:
+  lr_scheduler:
+    name: "linear_warmup"
+    warmup_steps: 1000
+    total_steps: 50000

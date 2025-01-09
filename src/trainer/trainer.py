@@ -30,16 +30,26 @@ class SummarizationModule(pl.LightningModule):
         )
         return optimizer
 
+    def _format_prompt(self, dialogue, model_type):
+        """모델별 최적화된 프롬프트 형식 반환"""
+        if model_type == "LlamaSummarizer":
+            return f"### Instruction: Summarize the following dialogue.\n\n### Input:\n{dialogue}\n\n### Response:"
+        elif model_type == "T5Summarizer":
+            return f"summarize: {dialogue}"
+        else:  # BART 등 다른 모델
+            return f"Summarize the following dialogue:\n{dialogue}"
+
     def _shared_step(self, batch, batch_idx=None):
         dialogues, summaries = batch
         
-        # 프롬프트 형식으로 입력 구성
+        # 1. 모델별 최적화된 프롬프트 구성
+        model_type = self.summarizer.__class__.__name__
         prompts = [
-            f"Summarize the following dialogue:\n{dialogue}\nSummary: {summary}"
-            for dialogue, summary in zip(dialogues, summaries)
+            self._format_prompt(dialogue, model_type)
+            for dialogue in dialogues
         ]
         
-        # 토크나이징
+        # 2. 입력 텍스트 토크나이징
         inputs = self.tokenizer(
             prompts,
             padding=True,
@@ -48,9 +58,15 @@ class SummarizationModule(pl.LightningModule):
             return_tensors="pt"
         ).to(self.device)
         
-        # 레이블 생성 (입력의 -1을 제외한 모든 토큰)
-        labels = inputs["input_ids"].clone()
-        # -100은 loss 계산에서 무시됨
+        # 3. 레이블(타겟) 토크나이징
+        with self.tokenizer.as_target_tokenizer():
+            labels = self.tokenizer(
+                summaries,  # 요약 텍스트만 레이블로 사용
+                padding=True,
+                truncation=True,
+                max_length=self.config.preprocessing.max_length,
+                return_tensors="pt"
+            ).input_ids.to(self.device)
         labels[labels == self.tokenizer.pad_token_id] = -100
         
         # forward pass 전에 train/eval 모드 설정
@@ -94,33 +110,27 @@ class SummarizationModule(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         loss, target_texts, generated_texts = self.summarizer._shared_step(batch, batch_idx)
         
-        # 디버깅을 위한 출력 추가
-        if batch_idx == 0:  # 첫 번째 배치에 대해서만
-            print("\n=== Validation Sample ===")
-            for i in range(min(3, len(target_texts))):  # 처음 3개 샘플만
-                print(f"\nInput: {batch[0][i][:100]}...")  # 입력 텍스트 앞부분
-                print(f"Target: {target_texts[i]}")
-                print(f"Generated: {generated_texts[i]}")
-                print("-" * 50)
+        # val_loss 로깅
+        self.log("val_loss", loss, prog_bar=True, batch_size=len(batch[0]), sync_dist=True)
         
-        # 기존 메트릭 계산
-        metrics = self.metrics.compute_metrics(generated_texts, target_texts)
+        # 메트릭 계산 및 로깅 (출력 없이)
+        if generated_texts and target_texts:
+            metrics = self.metrics.compute_metrics(generated_texts, target_texts)
+            for k, v in metrics.items():
+                self.log(f"val_{k}", v, prog_bar=True, batch_size=len(batch[0]), sync_dist=True)
         
-        # batch_size 명시적으로 지정하여 로깅
-        batch_size = len(batch[0])  # 배치의 첫 번째 요소(입력 텍스트)의 길이
-        self.log_dict(
-            {f"val_{k}": v for k, v in metrics.items()},
-            batch_size=batch_size,
-            prog_bar=True
-        )
-        
-        # loss도 batch_size와 함께 로깅
-        self.log("val_loss", loss, batch_size=batch_size, prog_bar=True)
+        # validation_step_outputs에 저장
+        self.validation_step_outputs.append({
+            "val_loss": loss,
+            "generated_texts": generated_texts,
+            "target_texts": target_texts,
+            "batch_idx": batch_idx  # 첫 번째 배치 식별용
+        })
         
         return {
-            "val_loss": loss, 
-            "metrics": metrics,
-            "batch_size": batch_size  # 나중에 사용할 수 있도록 batch_size도 반환
+            "val_loss": loss,
+            "metrics": metrics if 'metrics' in locals() else {},
+            "batch_size": len(batch[0])
         }
 
     def on_validation_epoch_start(self):
@@ -129,23 +139,43 @@ class SummarizationModule(pl.LightningModule):
 
     def on_validation_epoch_end(self):
         """검증 에폭 종료 시 전체 ROUGE 스코어 계산"""
-        # 모든 생성된 텍스트와 타겟 텍스트 수집
         all_generated = []
         all_targets = []
+        total_val_loss = 0
+        num_batches = 0
         
+        # 샘플 출력을 위한 첫 번째 배치 데이터 찾기
+        first_batch = next((x for x in self.validation_step_outputs if x["batch_idx"] == 0), None)
+        
+        # 에폭 종료 시 샘플 출력
+        if first_batch and first_batch["generated_texts"]:
+            print(f"\n=== Validation Epoch {self.current_epoch} ===")
+            for i in range(min(3, len(first_batch["generated_texts"]))):
+                print(f"\nTarget: {first_batch['target_texts'][i]}")
+                print(f"Generated: {first_batch['generated_texts'][i]}")
+                print("-" * 50)
+        
+        # 전체 메트릭 계산
         for output in self.validation_step_outputs:
-            if output["generated_texts"] is not None and output["target_texts"] is not None:
+            if output["generated_texts"] and output["target_texts"]:
                 all_generated.extend(output["generated_texts"])
                 all_targets.extend(output["target_texts"])
+            total_val_loss += output["val_loss"]
+            num_batches += 1
         
-        # 전체 데이터에 대한 ROUGE 스코어 계산
+        # 평균 validation loss 계산 및 로깅
+        avg_val_loss = total_val_loss / num_batches if num_batches > 0 else 0
+        self.log("val_loss", avg_val_loss, prog_bar=True, sync_dist=True)
+        
+        # 전체 데이터에 대한 ROUGE 스코어 계산 및 출력
         if all_generated and all_targets:
             rouge_scores = compute_rouge(all_generated, all_targets)
-            
-            # ROUGE 스코어 로깅
-            self.log("val_rouge1", rouge_scores['rouge1'], prog_bar=True)
-            self.log("val_rouge2", rouge_scores['rouge2'], prog_bar=True)
-            self.log("val_rougeL", rouge_scores['rougeL'], prog_bar=True)
+            print(f"\nEpoch {self.current_epoch} Metrics:")
+            print(f"Val Loss: {avg_val_loss:.4f}")
+            for k, v in rouge_scores.items():
+                self.log(f"val_{k}", v, prog_bar=True, sync_dist=True)
+                print(f"{k}: {v:.4f}")
+            print("-" * 50)
         
         # 메모리 정리
         self.validation_step_outputs.clear()
