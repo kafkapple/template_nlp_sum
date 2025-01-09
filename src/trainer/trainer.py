@@ -32,48 +32,47 @@ class SummarizationModule(pl.LightningModule):
     def _shared_step(self, batch, batch_idx=None):
         dialogues, summaries = batch
         
-        # 1. 데이터를 ��바른 디바이스로 이동
-        tokenized = self.tokenizer(
-            list(dialogues), 
-            padding=True, 
-            truncation=True, 
-            max_length=512,
+        # 프롬프트 형식으로 입력 구성
+        prompts = [
+            f"Summarize the following dialogue:\n{dialogue}\nSummary: {summary}"
+            for dialogue, summary in zip(dialogues, summaries)
+        ]
+        
+        # 토크나이징
+        inputs = self.tokenizer(
+            prompts,
+            padding=True,
+            truncation=True,
+            max_length=self.config.preprocessing.max_length,
             return_tensors="pt"
         ).to(self.device)
         
-        with self.tokenizer.as_target_tokenizer():
-            labels = self.tokenizer(
-                list(summaries), 
-                padding=True, 
-                truncation=True, 
-                max_length=128,
-                return_tensors="pt"
-            ).input_ids.to(self.device)
+        # 레이블 생성 (입력의 -1을 제외한 모든 토큰)
+        labels = inputs["input_ids"].clone()
+        # -100은 loss 계산에서 무시됨
+        labels[labels == self.tokenizer.pad_token_id] = -100
         
-        # 2. forward pass 전에 train/eval ��드 설정
+        # forward pass 전에 train/eval 모드 설정
         if self.training:
             self.summarizer.train()
-            # training 모드에서는 gradient 계산이 필요
             outputs = self.summarizer.model(
-                input_ids=tokenized["input_ids"],
-                attention_mask=tokenized["attention_mask"],
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs["attention_mask"],
                 labels=labels
             )
             loss = outputs.loss
-            assert loss.requires_grad, "Loss does not require gradients in training mode!"
             return loss, None, None
         else:
-            # validation 모드
             self.summarizer.eval()
-            with torch.no_grad():  # validation에서는 gradient 계산 불필요
+            with torch.no_grad():
                 outputs = self.summarizer.model(
-                    input_ids=tokenized["input_ids"],
-                    attention_mask=tokenized["attention_mask"],
+                    input_ids=inputs["input_ids"],
+                    attention_mask=inputs["attention_mask"],
                     labels=labels
                 )
                 loss = outputs.loss
                 
-                # 첫 번째 배��의 첫 번째 예시에 대해서만 생성
+                # 첫 번째 배치의 첫 번째 예시에 대해서만 생성
                 if batch_idx == 0:
                     generated_summary = self.summarizer.generate_summary(dialogues[0])
                     return loss, [generated_summary], [summaries[0]]
@@ -113,22 +112,78 @@ class SummarizationModule(pl.LightningModule):
 
     def plot_training_curves(self):
         """학습 곡선 시각화"""
-        import matplotlib.pyplot as plt
-        
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-        
-        # 손실 곡선
-        metrics = self.trainer.callback_metrics
-        ax1.plot(metrics['train_loss'], label='Train')
-        ax1.plot(metrics['val_loss'], label='Validation')
-        ax1.set_title('Loss Curves')
-        ax1.legend()
-        
-        # ROUGE 스코어
-        ax2.plot(metrics['val_rouge1'], label='ROUGE-1')
-        ax2.plot(metrics['val_rouge2'], label='ROUGE-2')
-        ax2.plot(metrics['val_rougeL'], label='ROUGE-L')
-        ax2.set_title('ROUGE Scores')
-        ax2.legend()
-        
-        return fig
+        try:
+            import matplotlib.pyplot as plt
+            import numpy as np
+            import torch
+            
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+            
+            # 손실 곡선
+            metrics = self.trainer.callback_metrics
+            print(f"Available metrics: {list(metrics.keys())}")  # 디버깅용
+            
+            # 텐서를 리스트로 변환 (numpy 대신)
+            def to_list(x):
+                if torch.is_tensor(x):
+                    try:
+                        return x.detach().cpu().tolist()
+                    except:
+                        return float(x)  # 스칼라 텐서의 경우
+                if isinstance(x, (list, tuple)):
+                    return x
+                return [float(x)]  # 단일 텐서의 경우
+            
+            # 손실값 가져기 (없으면 빈 리스트)
+            train_loss = to_list(metrics.get('train_loss', 0.0))
+            val_loss = to_list(metrics.get('val_loss', 0.0))
+            
+            # 리스트가 아닌 경우 리스트로 변환
+            if not isinstance(train_loss, list):
+                train_loss = [train_loss]
+            if not isinstance(val_loss, list):
+                val_loss = [val_loss]
+            
+            print(f"Train loss: {train_loss}")  # 디버깅용
+            print(f"Val loss: {val_loss}")      # 디버깅용
+            
+            # 손실 곡선 그리기
+            epochs = range(len(train_loss))
+            ax1.plot(epochs, train_loss, label='Train')
+            ax1.plot(epochs, val_loss, label='Validation')
+            ax1.set_title('Loss Curves')
+            ax1.set_xlabel('Epoch')
+            ax1.set_ylabel('Loss')
+            ax1.legend()
+            
+            # ROUGE 스코어
+            if 'val_rouge1' in metrics:
+                rouge1 = to_list(metrics['val_rouge1'])
+                rouge2 = to_list(metrics['val_rouge2'])
+                rougeL = to_list(metrics['val_rougeL'])
+                
+                if not isinstance(rouge1, list): rouge1 = [rouge1]
+                if not isinstance(rouge2, list): rouge2 = [rouge2]
+                if not isinstance(rougeL, list): rougeL = [rougeL]
+                
+                epochs = range(len(rouge1))
+                ax2.plot(epochs, rouge1, label='ROUGE-1')
+                ax2.plot(epochs, rouge2, label='ROUGE-2')
+                ax2.plot(epochs, rougeL, label='ROUGE-L')
+                ax2.set_title('ROUGE Scores')
+                ax2.set_xlabel('Epoch')
+                ax2.set_ylabel('Score')
+                ax2.legend()
+            else:
+                ax2.text(0.5, 0.5, 'ROUGE scores not available yet', 
+                        horizontalalignment='center', verticalalignment='center')
+            
+            plt.tight_layout()
+            return fig
+            
+        except Exception as e:
+            import traceback
+            print(f"Warning: Failed to plot training curves")
+            print(f"Error: {str(e)}")
+            print(f"Traceback: {traceback.format_exc()}")
+            return None

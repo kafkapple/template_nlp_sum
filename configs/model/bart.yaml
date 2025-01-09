@@ -1,30 +1,10 @@
+# 모델 기본 설정
 name: "facebook/bart-base"
 tokenizer_name: "facebook/bart-base"
 max_length: 128
 num_beams: 4
 learning_rate: 3e-5
 weight_decay: 0.01
+use_fp16: false
 use_pretrained: true
 use_custom: false
-
-# 미세조정 전략 설정
-finetune_strategy:
-  # 기본 설정
-  gradient_checkpointing: true
-  freeze_embeddings: true
-  
-  # 학습할 레이어 설정
-  unfreeze_layers:
-    - "model.decoder.layers.11.self_attn.q_proj"
-    - "model.decoder.layers.11.self_attn.v_proj"
-    - "model.decoder.layers.11.fc1"
-    - "model.decoder.layers.11.fc2"
-    - "model.decoder.layers.10.self_attn.q_proj"
-    - "model.decoder.layers.10.self_attn.v_proj"
-    - "model.decoder.layers.10.fc1"
-    - "model.decoder.layers.10.fc2"
-    - "model.shared"
-    - "final_logits_bias"
-
-  # 양자화 설정
-  quantization: "none"

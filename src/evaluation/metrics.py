@@ -23,36 +23,40 @@ class SummarizationMetrics:
         Args:
             config: Hydra config object containing metrics settings
         """
-        self.metrics = {}
         metrics_cfg = config.metrics
+        self.metrics = {}
         
         # ROUGE 설정
         if metrics_cfg.rouge.enabled:
-            self.metrics['rouge'] = load('rouge')
-            self.rouge_config = metrics_cfg.rouge
-            
-        # BERTScore 설정
-        if metrics_cfg.bertscore.enabled:
-            self.metrics['bertscore'] = load('bertscore')
-            self.bertscore_config = metrics_cfg.bertscore
-            
-        # METEOR 설정
-        if metrics_cfg.meteor.enabled:
-            self.metrics['meteor'] = load('meteor')
-            
-        # BLEURT 설정
-        if metrics_cfg.bleurt.enabled:
-            self.metrics['bleurt'] = load('bleurt')
-            
+            self.metrics['rouge'] = {
+                'types': metrics_cfg.rouge.types,
+                'use_stemmer': metrics_cfg.rouge.use_stemmer,
+                'use_aggregator': metrics_cfg.rouge.use_aggregator,
+                'lowercase': metrics_cfg.rouge.lowercase
+            }
+        
         # BLEU 설정
         if metrics_cfg.bleu.enabled:
-            self.bleu_smoothing = SmoothingFunction()
-            smooth_method = getattr(
-                self.bleu_smoothing, 
-                metrics_cfg.bleu.smooth_method
-            )
-            self.bleu_config = {
-                'smoothing_function': smooth_method
+            self.metrics['bleu'] = {
+                'smooth_method': metrics_cfg.bleu.smooth_method
+            }
+        
+        # BERTScore 설정
+        if metrics_cfg.bertscore.enabled:
+            self.metrics['bertscore'] = {
+                'model_type': metrics_cfg.bertscore.model_type,
+                'batch_size': metrics_cfg.bertscore.batch_size
+            }
+        
+        # METEOR 설정
+        if metrics_cfg.meteor.enabled:
+            self.metrics['meteor'] = {}
+        
+        # BLEURT 설정 (있는 경우에만)
+        if hasattr(metrics_cfg, 'bleurt') and metrics_cfg.bleurt.enabled:
+            self.metrics['bleurt'] = {
+                'checkpoint': metrics_cfg.bleurt.get('checkpoint', 'bleurt-base-128'),
+                'batch_size': metrics_cfg.bleurt.get('batch_size', 8)
             }
 
     def compute_metrics(
@@ -108,15 +112,15 @@ class SummarizationMetrics:
         results = self.metrics['rouge'].compute(
             predictions=predictions,
             references=references,
-            use_stemmer=self.rouge_config.use_stemmer,
-            use_aggregator=self.rouge_config.use_aggregator
+            use_stemmer=self.metrics['rouge']['use_stemmer'],
+            use_aggregator=self.metrics['rouge']['use_aggregator']
         )
         
-        # 각 ROUGE 점수의 ��균값 계산
+        # torch를 사용하여 평균 계산
         return {
-            'rouge1': float(np.mean(results['rouge1'])),
-            'rouge2': float(np.mean(results['rouge2'])),
-            'rougeL': float(np.mean(results['rougeL']))
+            'rouge1': torch.tensor(results['rouge1']).mean().item(),
+            'rouge2': torch.tensor(results['rouge2']).mean().item(),
+            'rougeL': torch.tensor(results['rougeL']).mean().item()
         }
 
     def _compute_bertscore(
@@ -134,9 +138,9 @@ class SummarizationMetrics:
         )
         
         return {
-            'bertscore_precision': np.mean(results['precision']),
-            'bertscore_recall': np.mean(results['recall']),
-            'bertscore_f1': np.mean(results['f1'])
+            'bertscore_precision': torch.tensor(results['precision']).mean().item(),
+            'bertscore_recall': torch.tensor(results['recall']).mean().item(),
+            'bertscore_f1': torch.tensor(results['f1']).mean().item()
         }
 
     def _compute_meteor(self, predictions: List[str], references: List[str]) -> float:
@@ -152,18 +156,18 @@ class SummarizationMetrics:
         
         for i in range(1, 5):
             weights = tuple([1.0/i]*i + [0]*(4-i))
-            scores = []
+            scores = torch.zeros(len(predictions))
             
-            for pred, ref in zip(predictions, references):
+            for idx, (pred, ref) in enumerate(zip(predictions, references)):
                 score = sentence_bleu(
                     [ref.split()],
                     pred.split(),
                     weights=weights,
-                    smoothing_function=self.bleu_smoothing
+                    smoothing_function=self.metrics['bleu']['smooth_method']
                 )
-                scores.append(score)
+                scores[idx] = score
                 
-            bleu_scores[f'bleu_{i}'] = np.mean(scores)
+            bleu_scores[f'bleu_{i}'] = scores.mean().item()
             
         return bleu_scores
 

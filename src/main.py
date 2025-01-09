@@ -1,4 +1,8 @@
 # src/main.py
+import os
+# OpenMP ��류 방지를 위한 환경 변수 설정
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+
 import hydra
 from omegaconf import DictConfig
 import pytorch_lightning as pl
@@ -61,7 +65,7 @@ def main(cfg: DictConfig):
         **OmegaConf.to_container(train_cfg.checkpoint, resolve=True)
     )
 
-    # 8. Trainer 설정
+    # 8. Trainer 설정 #I love you
     trainer = pl.Trainer(
         max_epochs=train_cfg.max_epochs,
         gpus=train_cfg.gpus,

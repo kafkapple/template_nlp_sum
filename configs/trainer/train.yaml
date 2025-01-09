@@ -1,6 +1,6 @@
-max_epochs: 3
+max_epochs: 10
 gpus: 1
-precision: 16
+precision: 32
 accumulate_grad_batches: 2
 
 # 로깅 관련 설정

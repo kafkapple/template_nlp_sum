@@ -1,13 +1,10 @@
-model:
-  name: "decapoda-research/llama-7b-hf"
-  tokenizer_name: "decapoda-research/llama-7b-hf"
+name: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+tokenizer_name: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 
-  max_length: 128
-  num_beams: 4
-  learning_rate: 2e-5
-  weight_decay: 0.01
-  use_pretrained: true
-
-  use_4bit: false
-  precision: 16    # fp16(default), bf16=bf16
-  # use_q_lora -> 상위 config.yaml에서 설정 확인
+max_length: 512
+num_beams: 4
+learning_rate: 3e-5
+weight_decay: 0.01
+use_fp16: false
+use_pretrained: true
+use_custom: false
