@@ -1,8 +1,8 @@
-dataset:
-  name: samsum
-  url: "https://huggingface.co/datasets/samsum"
-  train_file: "train.json"
-  dev_file: "validation.json"
-  test_file: "test.json"
-  batch_size: 4
-  max_length: 512
+
+name: samsum
+url: "https://huggingface.co/datasets/samsum"
+train_file: "train.json"
+dev_file: "validation.json"
+test_file: "test.json"
+batch_size: 4
+max_length: 512
