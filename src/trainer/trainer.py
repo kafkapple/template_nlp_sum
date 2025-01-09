@@ -5,29 +5,85 @@ from torch.utils.data import random_split
 from evaluation.metrics import compute_rouge, SummarizationMetrics
 import wandb
 import matplotlib.pyplot as plt
+from transformers import get_linear_schedule_with_warmup
 
 class SummarizationModule(pl.LightningModule):
     def __init__(self, model, tokenizer, config):
         super().__init__()
-        self.summarizer = model
+        self.model = model
         self.tokenizer = tokenizer
         self.config = config
         self.metrics = SummarizationMetrics(config)
+        self.save_hyperparameters(config)
         
-        # config를 yaml 형태로 변환하여 저장
-        config_dict = OmegaConf.to_container(config, resolve=True)
-        self.save_hyperparameters({
-            "config": config_dict,
-            "model_type": self.summarizer.__class__.__name__
-        })
-
+    def training_step(self, batch, batch_idx):
+        loss, _, _ = self.model._shared_step(batch, batch_idx)
+        
+        # WandB에 학습 지표 로깅
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        
+        return loss
+    
+    def validation_step(self, batch, batch_idx):
+        loss, references, predictions = self.model._shared_step(batch, batch_idx)
+        
+        # WandB에 검증 지표 로깅
+        self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        
+        # 메트릭 계산 및 로깅
+        if predictions is not None and references is not None:
+            metrics = self.metrics.compute_metrics(predictions, references)
+            for metric_name, value in metrics.items():
+                self.log(f'val_{metric_name}', value, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        
+        return {'val_loss': loss, 'references': references, 'predictions': predictions}
+    
+    def validation_epoch_end(self, outputs):
+        # 에포크 단위 메트릭 계산
+        if not outputs:
+            return
+        
+        # 전체 예측과 참조 수집
+        all_predictions = []
+        all_references = []
+        for output in outputs:
+            if output['predictions'] is not None and output['references'] is not None:
+                all_predictions.extend(output['predictions'])
+                all_references.extend(output['references'])
+        
+        if all_predictions and all_references:
+            # 전체 데이터셋에 대한 메트릭 계산
+            metrics = self.metrics.compute_metrics(all_predictions, all_references)
+            
+            # WandB에 에포크 단위 메트릭 로깅
+            for metric_name, value in metrics.items():
+                self.log(f'epoch_val_{metric_name}', value, on_epoch=True, logger=True)
+    
     def configure_optimizers(self):
-        # 학습 가능한 파라미터만 optimizer에 전달
+        # 옵티마이저 설정
         optimizer = torch.optim.AdamW(
-            filter(lambda p: p.requires_grad, self.summarizer.model.parameters()),
+            self.model.parameters(),
             lr=self.config.model.learning_rate,
             weight_decay=self.config.model.weight_decay
         )
+        
+        # 스케줄러 설정
+        if hasattr(self.config.trainer, 'optimizer') and hasattr(self.config.trainer.optimizer, 'lr_scheduler'):
+            scheduler_config = self.config.trainer.optimizer.lr_scheduler
+            scheduler = get_linear_schedule_with_warmup(
+                optimizer,
+                num_warmup_steps=scheduler_config.warmup_steps,
+                num_training_steps=scheduler_config.total_steps
+            )
+            return {
+                'optimizer': optimizer,
+                'lr_scheduler': {
+                    'scheduler': scheduler,
+                    'interval': 'step',
+                    'frequency': 1
+                }
+            }
+        
         return optimizer
 
     def _format_prompt(self, dialogue, model_type):
@@ -43,7 +99,7 @@ class SummarizationModule(pl.LightningModule):
         dialogues, summaries = batch
         
         # 1. 모델별 최적화된 프롬프트 구성
-        model_type = self.summarizer.__class__.__name__
+        model_type = self.model.__class__.__name__
         prompts = [
             self._format_prompt(dialogue, model_type)
             for dialogue in dialogues
@@ -71,8 +127,8 @@ class SummarizationModule(pl.LightningModule):
         
         # forward pass 전에 train/eval 모드 설정
         if self.training:
-            self.summarizer.train()
-            outputs = self.summarizer.model(
+            self.model.train()
+            outputs = self.model.model(
                 input_ids=inputs["input_ids"],
                 attention_mask=inputs["attention_mask"],
                 labels=labels
@@ -80,9 +136,9 @@ class SummarizationModule(pl.LightningModule):
             loss = outputs.loss
             return loss, None, None
         else:
-            self.summarizer.eval()
+            self.model.eval()
             with torch.no_grad():
-                outputs = self.summarizer.model(
+                outputs = self.model.model(
                     input_ids=inputs["input_ids"],
                     attention_mask=inputs["attention_mask"],
                     labels=labels
@@ -91,47 +147,10 @@ class SummarizationModule(pl.LightningModule):
                 
                 # 첫 번째 배치의 첫 번째 예시에 대해서만 생성
                 if batch_idx == 0:
-                    generated_summary = self.summarizer.generate_summary(dialogues[0])
+                    generated_summary = self.model.generate_summary(dialogues[0])
                     return loss, [generated_summary], [summaries[0]]
                 
                 return loss, None, None
-
-    def training_step(self, batch, batch_idx):
-        loss, _, _ = self._shared_step(batch, batch_idx)
-        self.log(
-            "train_loss", 
-            loss, 
-            on_epoch=True, 
-            prog_bar=True, 
-            batch_size=len(batch[0])
-        )
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        loss, target_texts, generated_texts = self.summarizer._shared_step(batch, batch_idx)
-        
-        # val_loss 로깅
-        self.log("val_loss", loss, prog_bar=True, batch_size=len(batch[0]), sync_dist=True)
-        
-        # 메트릭 계산 및 로깅 (출력 없이)
-        if generated_texts and target_texts:
-            metrics = self.metrics.compute_metrics(generated_texts, target_texts)
-            for k, v in metrics.items():
-                self.log(f"val_{k}", v, prog_bar=True, batch_size=len(batch[0]), sync_dist=True)
-        
-        # validation_step_outputs에 저장
-        self.validation_step_outputs.append({
-            "val_loss": loss,
-            "generated_texts": generated_texts,
-            "target_texts": target_texts,
-            "batch_idx": batch_idx  # 첫 번째 배치 식별용
-        })
-        
-        return {
-            "val_loss": loss,
-            "metrics": metrics if 'metrics' in locals() else {},
-            "batch_size": len(batch[0])
-        }
 
     def on_validation_epoch_start(self):
         """검증 에폭 시작 시 출력 저장용 리스트 초기화"""
