@@ -27,13 +27,13 @@ finetune_strategy:
   gradient_checkpointing: true
   freeze_embeddings: true
   
-  # 학습할 레이어 설정
+  # 학습할 레이어 설정 (T5 모델용)
   unfreeze_layers:
-    - "model.embed_tokens"
-    - "model.layers.0"
-    - "model.layers.1"
-    - "model.norm"
-    - "lm_head"
+    - "shared"
+    - "encoder.block.0"
+    - "encoder.block.1"
+    - "decoder.block.0"
+    - "decoder.block.1"
 
   # 양자화 설정
   quantization: "none"
