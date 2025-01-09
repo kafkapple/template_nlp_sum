@@ -3,14 +3,21 @@ tokenizer_name: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 
 max_length: 512
 num_beams: 4
-learning_rate: 3e-5
+learning_rate: 5e-5
 weight_decay: 0.01
 
-# Fine-tuning 설정 추가
+# Fine-tuning 설정 수정
 finetune_strategy:
   unfreeze_layers:
-    - "model.layers.31"  # 마지막 레이어
-    - "model.layers.30"  # 마지막에서 두 번째 레이어
-    - "lm_head"         # 출력 레이어
+    - "model.layers.31"
+    - "model.layers.30"
+    - "model.layers.29"
+    - "model.layers.28"
+    - "lm_head"
   gradient_checkpointing: true
   freeze_embeddings: true
+
+generation:
+  temperature: 0.7
+  top_p: 0.9
+  repetition_penalty: 1.2

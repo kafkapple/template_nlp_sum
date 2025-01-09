@@ -8,6 +8,7 @@ class BartSummarizer(BaseModel):
         super().__init__()
         model_cfg = config.model
         finetune_cfg = config.finetune_strategy
+        self.config = config
         
         # 모델 로드
         self.model = BartForConditionalGeneration.from_pretrained(
@@ -16,12 +17,15 @@ class BartSummarizer(BaseModel):
             torch_dtype=torch.float16 if model_cfg.get("use_fp16", False) else torch.float32,
         )
         
-        # 먼저 모든 ��이어 이름 출력
+        # device 설정
+        self.model.to(self.device)
+        
+        # 먼저 모든 파라미터 이름 출력
         print("\nAvailable layers:")
         for name, _ in self.model.named_parameters():
             print(f"  - {name}")
         
-        # 1. 먼저 모� 파라미터 동결
+        # 1. 먼저 모든 파라미터 동결
         for param in self.model.parameters():
             param.requires_grad = False
         
@@ -54,10 +58,10 @@ class BartSummarizer(BaseModel):
             for name, _ in self.model.named_parameters():
                 print(f"  - model.{name}")
         
-        # 4. 모델을 �시적으로 train 모드로 설정
+        # 4. 모델을 시적으로 train 모드로 설정
         self.model.train()
         
-        # 5. gradient checkpointing 활성�
+        # 5. gradient checkpointing 활성
         if getattr(finetune_cfg, "gradient_checkpointing", True):
             self.model.gradient_checkpointing_enable()
         
@@ -79,25 +83,65 @@ class BartSummarizer(BaseModel):
         return outputs
 
     def generate_summary(self, text):
-        # 입력 텍스트 토크나이징
         inputs = self.tokenizer(
-            text, 
-            return_tensors="pt", 
-            max_length=self.max_length, 
-            truncation=True
-        )
-        
-        # 모든 텐서를 모델과 같은 디바이스로 이동
-        device = next(self.model.parameters()).device
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-        
-        # 요약 생성
-        summary_ids = self.model.generate(
-            input_ids=inputs["input_ids"],
-            attention_mask=inputs["attention_mask"],
-            num_beams=self.num_beams,
+            text,
             max_length=self.max_length,
-            early_stopping=True
+            truncation=True,
+            padding=True,
+            return_tensors="pt"
+        ).to(self.device)
+        
+        outputs = self.model.generate(
+            input_ids=inputs.input_ids,
+            attention_mask=inputs.attention_mask,
+            max_length=self.max_length,
+            num_beams=self.num_beams,
+            length_penalty=2.0,
+            early_stopping=True,
+            no_repeat_ngram_size=3,
+            temperature=0.7,
+            top_p=0.9,
+            repetition_penalty=1.2
         )
         
-        return self.tokenizer.decode(summary_ids[0], skip_special_tokens=True)
+        return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+    def _shared_step(self, batch, batch_idx=None):
+        dialogues, summaries = batch
+        
+        # 입력 형식 수정
+        inputs = self.tokenizer(
+            dialogues,
+            padding=True,
+            truncation=True,
+            max_length=self.config.preprocessing.max_length,
+            return_tensors="pt"
+        ).to(self.device)
+        
+        # 타겟 텍스트 인코딩
+        with self.tokenizer.as_target_tokenizer():
+            labels = self.tokenizer(
+                summaries,
+                padding=True,
+                truncation=True,
+                max_length=self.config.preprocessing.max_length,
+                return_tensors="pt"
+            ).input_ids.to(self.device)
+        
+        # -100으로 패딩 토큰 마스킹
+        labels[labels == self.tokenizer.pad_token_id] = -100
+        
+        outputs = self.model(
+            input_ids=inputs.input_ids,
+            attention_mask=inputs.attention_mask,
+            labels=labels,
+            return_dict=True
+        )
+        
+        if self.training:
+            return outputs.loss, None, None
+        else:
+            generated_summaries = [
+                self.generate_summary(dialogue) for dialogue in dialogues
+            ]
+            return outputs.loss, summaries, generated_summaries

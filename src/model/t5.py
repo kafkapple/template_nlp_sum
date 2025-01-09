@@ -15,6 +15,7 @@ class T5Summarizer(BaseModel):
         super().__init__()
         model_cfg = config.model
         finetune_cfg = config.finetune_strategy
+        self.config = config
         
         # 모델과 토크나이저 로드
         self.tokenizer = T5Tokenizer.from_pretrained(model_cfg.tokenizer_name)
@@ -22,6 +23,9 @@ class T5Summarizer(BaseModel):
             model_cfg.name,
             device_map="auto" if torch.cuda.is_available() else None
         )
+        
+        # device 설정
+        self.model.to(self.device)
         
         # 먼저 모든 레이어 이름 출력
         print("\nAvailable layers:")
@@ -73,30 +77,71 @@ class T5Summarizer(BaseModel):
         return outputs
 
     def generate_summary(self, text):
-        # 프롬프트 추가
-        prefix = "summarize: "
-        input_text = prefix + text
+        if not text.startswith("summarize: "):
+            text = "summarize: " + text
         
-        # 입력 텍스트 토크나이징
         inputs = self.tokenizer(
-            input_text,
-            return_tensors="pt",
-            max_length=self.max_length,
+            text,
+            max_length=self.config.preprocessing.max_length,
             truncation=True,
-            padding=True
-        )
+            padding=True,
+            return_tensors="pt"
+        ).to(self.device)
         
-        # 모든 텐서를 모델과 같은 디바이스로 이동
-        device = next(self.model.parameters()).device
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-        
-        # 요약 생성
-        summary_ids = self.model.generate(
-            **inputs,
+        outputs = self.model.generate(
+            input_ids=inputs.input_ids,
+            attention_mask=inputs.attention_mask,
             max_length=self.max_length,
             num_beams=self.num_beams,
+            length_penalty=2.0,
             early_stopping=True,
-            no_repeat_ngram_size=2
+            no_repeat_ngram_size=3,
+            temperature=0.7,
+            top_p=0.9,
+            repetition_penalty=1.2
         )
         
-        return self.tokenizer.decode(summary_ids[0], skip_special_tokens=True)
+        return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+    def _shared_step(self, batch, batch_idx=None):
+        dialogues, summaries = batch
+        
+        # 입력에 prefix 추가
+        prefix = "summarize: "
+        dialogues = [prefix + dialogue for dialogue in dialogues]
+        
+        # 입력 인코딩
+        inputs = self.tokenizer(
+            dialogues,
+            padding=True,
+            truncation=True,
+            max_length=self.config.preprocessing.max_length,
+            return_tensors="pt"
+        ).to(self.device)
+        
+        # 타겟 텍스트 인코딩
+        labels = self.tokenizer(
+            summaries,
+            padding=True,
+            truncation=True,
+            max_length=self.max_length,
+            return_tensors="pt"
+        ).input_ids.to(self.device)
+        
+        # -100으로 패딩 토큰 마스킹
+        labels[labels == self.tokenizer.pad_token_id] = -100
+        
+        outputs = self.model(
+            input_ids=inputs.input_ids,
+            attention_mask=inputs.attention_mask,
+            labels=labels,
+            return_dict=True
+        )
+        
+        if self.training:
+            return outputs.loss, None, None
+        else:
+            generated_summaries = [
+                self.generate_summary(dialogue) for dialogue in dialogues
+            ]
+            return outputs.loss, summaries, generated_summaries

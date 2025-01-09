@@ -7,6 +7,7 @@ class LlamaSummarizer(BaseModel):
         super().__init__()
         model_cfg = config.model
         finetune_cfg = config.finetune_strategy
+        self.config = config
         
         # 모델과 토크나이저 로드
         self.model = LlamaForCausalLM.from_pretrained(
@@ -14,6 +15,13 @@ class LlamaSummarizer(BaseModel):
             device_map="auto" if torch.cuda.is_available() else None
         )
         self.tokenizer = LlamaTokenizer.from_pretrained(model_cfg.tokenizer_name)
+        
+        # 필수 토큰 설정 추가
+        self.tokenizer.pad_token = self.tokenizer.eos_token
+        self.tokenizer.padding_side = "right"  # 오른쪽 패딩
+        
+        # 모델에도 pad_token_id 설정
+        self.model.config.pad_token_id = self.tokenizer.pad_token_id
         
         # 먼저 모든 레이어 이름 출력
         print("\nAvailable layers:")
@@ -57,6 +65,9 @@ class LlamaSummarizer(BaseModel):
         
         self.max_length = model_cfg.max_length
         self.num_beams = model_cfg.num_beams
+        
+        # device 설정
+        self.model.to(self.device)
 
     def forward(self, input_ids, attention_mask, labels=None):
         outputs = self.model(
@@ -68,10 +79,9 @@ class LlamaSummarizer(BaseModel):
         return outputs
 
     def generate_summary(self, text):
-        # 프롬프트 추가
-        prompt = f"Summarize the following dialogue:\n{text}\nSummary:"
+        # 프롬프트 형식 수정
+        prompt = f"### Instruction: Summarize the following dialogue.\n\n### Input:\n{text}\n\n### Response:"
         
-        # 입력 텍스트 토크나이징
         inputs = self.tokenizer(
             prompt,
             return_tensors="pt",
@@ -80,18 +90,62 @@ class LlamaSummarizer(BaseModel):
             padding=True
         )
         
-        # 모든 텐서를 모델과 같은 디바이스로 이동
         device = next(self.model.parameters()).device
         inputs = {k: v.to(device) for k, v in inputs.items()}
         
-        # 요약 생성
+        # 생성 파라미터 조정
         outputs = self.model.generate(
             **inputs,
             max_length=self.max_length,
             num_beams=self.num_beams,
+            temperature=0.7,
+            top_p=0.9,
+            repetition_penalty=1.2,
             early_stopping=True,
             pad_token_id=self.tokenizer.pad_token_id,
             eos_token_id=self.tokenizer.eos_token_id
         )
         
-        return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        # Response: 이후의 텍스트만 반환
+        response_start = generated_text.find("### Response:")
+        if response_start != -1:
+            return generated_text[response_start + len("### Response:"):].strip()
+        return generated_text
+
+    def _shared_step(self, batch, batch_idx=None):
+        dialogues, summaries = batch
+        
+        # 프롬프트 형식 수정
+        prompts = []
+        for dialogue, summary in zip(dialogues, summaries):
+            prompt = f"### Instruction: Summarize the following dialogue.\n\n### Input:\n{dialogue}\n\n### Response:\n{summary}"
+            prompts.append(prompt)
+        
+        # 토크나이징
+        inputs = self.tokenizer(
+            prompts,
+            padding=True,
+            truncation=True,
+            max_length=self.config.preprocessing.max_length,
+            return_tensors="pt"
+        ).to(self.device)
+        
+        # 레이블 처리 수정
+        labels = inputs["input_ids"].clone()
+        # Response: 이전의 토큰은 -100으로 마스킹
+        for i, prompt in enumerate(prompts):
+            instruction_pos = prompt.find("### Response:")
+            if instruction_pos != -1:
+                # Response: 이전의 토큰은 loss 계산에서 제외
+                response_token_pos = self.tokenizer(prompt[:instruction_pos], return_tensors="pt")["input_ids"].shape[1]
+                labels[i, :response_token_pos] = -100
+        
+        # forward pass
+        outputs = self.model(
+            input_ids=inputs["input_ids"],
+            attention_mask=inputs["attention_mask"],
+            labels=labels
+        )
+        
+        return outputs.loss, None, None if self.training else (outputs.loss, summaries, [self.generate_summary(d) for d in dialogues])

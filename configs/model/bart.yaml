@@ -3,8 +3,16 @@ name: "facebook/bart-base"
 tokenizer_name: "facebook/bart-base"
 max_length: 128
 num_beams: 4
-learning_rate: 3e-5
+learning_rate: 5e-5
 weight_decay: 0.01
 use_fp16: false
 use_pretrained: true
 use_custom: false
+finetune_strategy:
+  unfreeze_layers:
+    - "encoder.layers.5"
+    - "encoder.layers.4"
+    - "decoder.layers.5"
+    - "decoder.layers.4"
+    - "shared"
+  gradient_checkpointing: true

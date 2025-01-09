@@ -7,6 +7,7 @@ from peft import LoraConfig, prepare_model_for_kbit_training, get_peft_model
 class BaseModel(nn.Module, ABC):
     def __init__(self):
         super().__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
     def setup_quantization(self, finetune_cfg):
         """양자화 설정"""

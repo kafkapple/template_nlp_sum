@@ -1,9 +1,8 @@
-
 name: "t5-base"
 tokenizer_name: "t5-base"
 max_length: 128
 num_beams: 4
-learning_rate: 3e-5
+learning_rate: 5e-5
 weight_decay: 0.01
 use_pretrained: true
 
@@ -21,7 +20,8 @@ fine_tuning:
     "encoder.block.11",
     "encoder.block.10",
     "decoder.block.11",
-    "decoder.block.10"
+    "decoder.block.10",
+    "shared"
   ]
   gradient_checkpointing: true
   freeze_embeddings: true
