@@ -1,8 +1,0 @@
-
-name: ami
-url: "https://ami-corpus.org/"
-train_file: "ami_train.jsonl"
-dev_file: "ami_dev.jsonl"
-test_file: "ami_test.jsonl"
-batch_size: 4
-max_length: 512

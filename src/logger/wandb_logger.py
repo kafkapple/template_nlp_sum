@@ -12,9 +12,15 @@ class WandBLogger(pl.loggers.WandbLogger, BaseLogger):
         save_dir: str,
         config: Dict[str, Any]
     ):
-        # Hydra config를 일반 dict로 변환
-        wandb_config = OmegaConf.to_container(config, resolve=True)
+        # Hydra config를 중첩 dict로 변환
+        wandb_config = OmegaConf.to_container(
+            config,
+            resolve=True,
+            enum_to_str=True,
+            structured_config_mode="dict"
+        )
         
+        # WandB 초기화
         wandb.init(
             project=project,
             name=name,
@@ -40,6 +46,27 @@ class WandBLogger(pl.loggers.WandbLogger, BaseLogger):
         """하이퍼파라미터 로깅"""
         if wandb.run is None:
             wandb.init()
+            
+        # OmegaConf 객체를 dict로 변환
+        if hasattr(params, "_content"):  # OmegaConf 객체인 경우
+            params = OmegaConf.to_container(
+                params,
+                resolve=True,
+                enum_to_str=True,
+                structured_config_mode="dict"
+            )
+        
+        # 중첩된 객체들을 dict로 변환
+        def convert_to_dict(obj):
+            if hasattr(obj, "__dict__"):
+                return {k: convert_to_dict(v) for k, v in obj.__dict__.items()}
+            elif isinstance(obj, dict):
+                return {k: convert_to_dict(v) for k, v in obj.items()}
+            elif isinstance(obj, (list, tuple)):
+                return [convert_to_dict(x) for x in obj]
+            return obj
+            
+        params = convert_to_dict(params)
         wandb.config.update(params, allow_val_change=True)
     
     def log_artifact(self, artifact_name: str, artifact_path: str, artifact_type: str):

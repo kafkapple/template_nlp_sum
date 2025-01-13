@@ -95,7 +95,7 @@ class BartSummarizer(BaseModel):
             input_ids=inputs.input_ids,
             attention_mask=inputs.attention_mask,
             max_length=self.max_length,
-            min_length=50,
+            min_length=10,
             length_penalty=2.0,
             num_beams=self.num_beams,
             early_stopping=True,
