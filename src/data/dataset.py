@@ -3,6 +3,8 @@ import re
 import os
 from torch.utils.data import Dataset
 from .download import ensure_dialogsum_files
+from datasets import load_dataset
+from .preprocessing import clean_text
 
 def basic_cleaning(text, remove_special=True, lower_case=False):
     text = re.sub(r"[^a-zA-Z0-9가-힣\s\.,\?]", "", text) if remove_special else text
@@ -11,49 +13,80 @@ def basic_cleaning(text, remove_special=True, lower_case=False):
     return text
 
 class DialogueSumDataset(Dataset):
-    def __init__(self, file_name, tokenizer, max_length=512, preprocessing_cfg=None, dataset_dir=None):
-        """
-        file_name: 예) 'dialogsum.train.jsonl'
-        dataset_dir: 데이터셋이 저장될 폴더 경로
-        """
-        self.samples = []
+    def __init__(self, file_name, tokenizer, max_length, preprocessing_cfg, dataset_dir):
+        # DialogSum 데이터셋 자동 다운로드 및 로드
+        self.dataset = load_dataset(
+            "knkarthick/dialogsum",
+            split=file_name,
+            cache_dir=dataset_dir
+        )
+        
         self.tokenizer = tokenizer
         self.max_length = max_length
-        self.preprocessing_cfg = preprocessing_cfg if preprocessing_cfg else {}
-
-        # 1) DialogSum 파일 자동 다운로드
-        if dataset_dir is not None:
-            ensure_dialogsum_files(dataset_dir)  
-            file_path = os.path.join(dataset_dir, file_name)
-        else:
-            file_path = file_name  # dataset_dir 없으면 직접 file_name만 사용
+        self.preprocessing_cfg = preprocessing_cfg
         
-        # 2) 파일 열기
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    data = json.loads(line.strip())
-                    dialogue = data.get("dialogue", "")
-                    summary = data.get("summary", "")
-                    # 전처리
-                    dialogue = basic_cleaning(
-                        dialogue,
-                        remove_special=self.preprocessing_cfg.get("remove_special_chars", True),
-                        lower_case=self.preprocessing_cfg.get("lower_case", False)
-                    )
-                    summary = basic_cleaning(
-                        summary,
-                        remove_special=self.preprocessing_cfg.get("remove_special_chars", True),
-                        lower_case=self.preprocessing_cfg.get("lower_case", False)
-                    )
-                    self.samples.append((dialogue, summary))
-        except FileNotFoundError:
-            print(f"[Warning] File not found: {file_path}")
-        except json.JSONDecodeError:
-            print(f"[Warning] JSON decoding error in file: {file_path}")
-
+        # 데이터 필터링
+        if preprocessing_cfg.get("filter_data", False):
+            self.dataset = self.dataset.filter(self._filter_sample)
+        
+        # 데이터 증강
+        if preprocessing_cfg.get("augment_data", False):
+            self.dataset = self._augment_dataset()
+    
     def __len__(self):
-        return len(self.samples)
+        return len(self.dataset)
+    
+    def _filter_sample(self, sample):
+        """데이터 품질 기반 필터링"""
+        dialogue = sample['dialogue']
+        summary = sample['summary']
+        
+        # 최소/최대 길이 확인
+        if len(dialogue.split()) < 10 or len(dialogue.split()) > 1000:
+            return False
+        if len(summary.split()) < 5 or len(summary.split()) > 100:
+            return False
+            
+        # 요약문이 대화문보다 길면 제외
+        if len(summary.split()) > len(dialogue.split()) * 0.5:
+            return False
+            
+        return True
+    
+    def _augment_dataset(self):
+        """데이터 증강 기법 적용"""
+        augmented_data = []
+        
+        for sample in self.dataset:
+            # 원본 데이터 유지
+            augmented_data.append(sample)
+            
+            # 화자 이름 변경
+            if self.preprocessing_cfg.get("speaker_augmentation", False):
+                dialogue = re.sub(r'Speaker:', 'Person:', sample['dialogue'])
+                augmented_data.append({
+                    'dialogue': dialogue,
+                    'summary': sample['summary']
+                })
+        
+        return augmented_data
 
     def __getitem__(self, idx):
-        return self.samples[idx]
+        item = self.dataset[idx]
+        dialogue = item['dialogue']
+        summary = item['summary']
+        
+        # 전처리 적용
+        if self.preprocessing_cfg.get("clean_text", True):
+            dialogue = basic_cleaning(
+                dialogue,
+                remove_special=self.preprocessing_cfg.get("remove_special_chars", True),
+                lower_case=self.preprocessing_cfg.get("lower_case", False)
+            )
+            summary = basic_cleaning(
+                summary,
+                remove_special=self.preprocessing_cfg.get("remove_special_chars", True),
+                lower_case=self.preprocessing_cfg.get("lower_case", False)
+            )
+        
+        return dialogue, summary

@@ -58,13 +58,14 @@ class BaseModel(nn.Module, ABC):
             for name, param in model.named_parameters():
                 if "embed" in name:
                     param.requires_grad = True
-                    
+                    print(f"Unfrozen: {name}")
+        
         # 3. 지정된 레이어 해동
-        unfreeze_layers = fine_tuning_cfg.unfreeze_layers
         for name, param in model.named_parameters():
-            for layer in unfreeze_layers:
+            for layer in fine_tuning_cfg.unfreeze_layers:
                 if layer in name:
                     param.requires_grad = True
+                    print(f"Unfrozen: {name}")
                     break
         
         # 4. Gradient Checkpointing 설정

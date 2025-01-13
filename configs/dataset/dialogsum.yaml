@@ -1,8 +1,23 @@
-name: dialogsum
-url: https://github.com/cylnlp/dialogsum/tree/main/DialogSum_Data
-train_file: dialogsum.train.jsonl
-dev_file: dialogsum.dev.jsonl
-test_file: dialogsum.test.jsonl
-batch_size: 4
+name: "dialogsum"
+dataset_dir: "${paths.data_dir}/dialogsum"
+
+# 파일 이름 수정
+train_file: "train"        # dialogsum.train.jsonl -> train
+dev_file: "validation"     # dialogsum.dev.jsonl -> validation
+test_file: "test"         # dialogsum.test.jsonl -> test
+
+batch_size: 8
 max_length: 512
-dataset_dir: "data"
+
+# 데이터 필터링 및 증강 설정 추가
+filter_data: true
+augment_data: false
+speaker_augmentation: false
+
+# 전처리 설정
+preprocessing:
+  clean_text: true
+  basic_cleaning: true
+  remove_special_chars: true
+  normalize_markers: true
+  normalize_punctuation: true
