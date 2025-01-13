@@ -7,7 +7,7 @@ learning_rate: 5e-5
 weight_decay: 0.01
 use_fp16: false
 use_pretrained: true
-use_custom: false
+
 
 # Fine-tuning 전략
 fine_tuning:
